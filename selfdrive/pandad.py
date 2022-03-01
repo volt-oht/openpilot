@@ -7,6 +7,7 @@ import subprocess
 from typing import NoReturn
 from functools import cmp_to_key
 
+from common.spinner import Spinner
 from panda import DEFAULT_FW_FN, DEFAULT_H7_FW_FN, MCU_TYPE_H7, Panda, PandaDFU
 from common.basedir import BASEDIR
 from common.params import Params
@@ -38,10 +39,23 @@ def flash_panda(panda_serial: str) -> Panda:
     cloudlog.info("Done flashing")
 
   if panda.bootstub:
-    bootstub_version = panda.get_version()
-    cloudlog.info(f"Flashed firmware not booting, flashing development bootloader. Bootstub version: {bootstub_version}")
+    spinner = Spinner()
+    spinner.update("Restoring panda")
     panda.recover()
-    cloudlog.info("Done flashing bootloader")
+    spinner.close()
+
+  if panda.bootstub:
+    spinner = Spinner()
+    spinner.update("Restoring panda")
+    try:
+      if panda.get_mcu_type() == MCU_TYPE_H7:
+        subprocess.run("cd /data/openpilot/panda/board; ./recover_h7.sh", capture_output=True, shell=True)
+      else:
+        subprocess.run("cd /data/openpilot/panda/board; ./recover.sh", capture_output=True, shell=True)
+      panda.reset()
+      panda.reconnect()
+    finally:
+      spinner.close()
 
   if panda.bootstub:
     cloudlog.info("Panda still not booting, exiting")
@@ -105,9 +119,9 @@ def main() -> NoReturn:
           params.put_bool("PandaHeartbeatLost", True)
           cloudlog.event("heartbeat lost", deviceState=health, serial=panda.get_usb_serial())
 
-        if first_run:
-          cloudlog.info(f"Resetting panda {panda.get_usb_serial()}")
-          panda.reset()
+        #if first_run:
+        #  cloudlog.info(f"Resetting panda {panda.get_usb_serial()}")
+        #  panda.reset()
 
       # sort pandas to have deterministic order
       pandas.sort(key=cmp_to_key(panda_sort_cmp))

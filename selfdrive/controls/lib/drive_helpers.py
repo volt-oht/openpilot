@@ -3,13 +3,15 @@ from cereal import car
 from common.numpy_fast import clip, interp
 from common.realtime import DT_MDL
 from selfdrive.config import Conversions as CV
+from selfdrive.kegman_kans_conf import kegman_kans_conf
 from selfdrive.modeld.constants import T_IDXS
+from selfdrive.ntune import ntune_common_get
 
-# WARNING: this value was determined based on the model's training distribution,
-#          model predictions above this speed can be unpredictable
-V_CRUISE_MAX = 145  # kph
-V_CRUISE_MIN = 8  # kph
-V_CRUISE_ENABLE_MIN = 40  # kph
+# kph
+kegman_kans = kegman_kans_conf()
+V_CRUISE_MAX = 145
+V_CRUISE_MIN = 8
+V_CRUISE_ENABLE_MIN = int(kegman_kans.conf['CruiseEnableMin'])
 
 LAT_MPC_N = 16
 LON_MPC_N = 32
@@ -17,7 +19,7 @@ CONTROL_N = 17
 CAR_ROTATION_RADIUS = 0.0
 
 # this corresponds to 80deg/s and 20deg/s steering angle in a toyota corolla
-MAX_CURVATURE_RATES = [0.03762194918267951, 0.003441203371932992]
+MAX_CURVATURE_RATES = [0.09405487295669877, 0.02351371824]
 MAX_CURVATURE_RATE_SPEEDS = [0, 35]
 
 CRUISE_LONG_PRESS = 50
@@ -32,9 +34,9 @@ CRUISE_INTERVAL_SIGN = {
 
 
 class MPC_COST_LAT:
-  PATH = 1.0
-  HEADING = 1.0
-  STEER_RATE = 1.0
+  PATH = .5
+  HEADING = .5
+  STEER_RATE = 1.5
 
 
 def rate_limit(new_value, last_value, dw_step, up_step):
@@ -54,7 +56,7 @@ def update_v_cruise(v_cruise_kph, buttonEvents, button_timers, enabled, metric):
   long_press = False
   button_type = None
 
-  v_cruise_delta = 1 if metric else 1.6
+  v_cruise_delta = 5 if metric else 1.6
 
   for b in buttonEvents:
     if b.type.raw in button_timers and not b.pressed:
@@ -70,7 +72,7 @@ def update_v_cruise(v_cruise_kph, buttonEvents, button_timers, enabled, metric):
         break
 
   if button_type:
-    v_cruise_delta = v_cruise_delta * (5 if long_press else 1)
+    v_cruise_delta = v_cruise_delta * (1 if long_press else 1)
     if long_press and v_cruise_kph % v_cruise_delta != 0: # partial interval
       v_cruise_kph = CRUISE_NEAREST_FUNC[button_type](v_cruise_kph / v_cruise_delta) * v_cruise_delta
     else:
@@ -96,7 +98,7 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates):
     curvature_rates = [0.0 for i in range(CONTROL_N)]
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
-  delay = CP.steerActuatorDelay + .2
+  delay = ntune_common_get('steerActuatorDelay') + .2
   current_curvature = curvatures[0]
   psi = interp(delay, T_IDXS[:CONTROL_N], psis)
   desired_curvature_rate = curvature_rates[0]
@@ -112,6 +114,6 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates):
                                           -max_curvature_rate,
                                           max_curvature_rate)
   safe_desired_curvature = clip(desired_curvature,
-                                     current_curvature - max_curvature_rate * DT_MDL,
-                                     current_curvature + max_curvature_rate * DT_MDL)
+                                     current_curvature - max_curvature_rate * 2,
+                                     current_curvature + max_curvature_rate * 2)
   return safe_desired_curvature, safe_desired_curvature_rate

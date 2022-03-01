@@ -307,7 +307,7 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   chargingDisabled @18 :Bool;
   offroadPowerUsageUwh @23 :UInt32;
   carBatteryCapacityUwh @25 :UInt32;
-  powerDrawW @40 :Float32;
+  powerDrawW @41 :Float32;
 
   # device thermals
   cpuTempC @26 :List(Float32);
@@ -317,11 +317,13 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   nvmeTempC @35 :List(Float32);
   modemTempC @36 :List(Float32);
   pmicTempC @39 :List(Float32);
-  thermalZones @38 :List(ThermalZone);
+  thermalZones @40 :List(ThermalZone);
   thermalStatus @14 :ThermalStatus;
 
   fanSpeedPercentDesired @10 :UInt16;
   screenBrightnessPercent @37 :Int8;
+
+  wifiIpAddress @38 :Text;
 
   struct ThermalZone {
     name @0 :Text;
@@ -372,9 +374,9 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   batDEPRECATED @6 :UInt32;
   pa0DEPRECATED @21 :UInt16;
   cpuUsagePercentDEPRECATED @20 :Int8;
-  batteryStatusDEPRECATED @9 :Text;
+  batteryStatus @9 :Text;
   batteryVoltageDEPRECATED @16 :Int32;
-  batteryTempCDEPRECATED @29 :Float32;
+  batteryTempC @29 :Float32;
 }
 
 struct PandaState @0xa7649e2575e4591e {
@@ -545,8 +547,14 @@ struct ControlsState @0x97ff69c53601abf1 {
   longitudinalPlanMonoTime @28 :UInt64;
   lateralPlanMonoTime @50 :UInt64;
 
-  state @31 :OpenpilotState;
+  # Wheel rotation
+  vEgo @0 :Float32;
+  angleSteers @13 :Float32;
   enabled @19 :Bool;
+  steerOverride @20 :Bool;
+
+  state @31 :OpenpilotState;
+  vEgoRaw @32 :Float32;
   active @36 :Bool;
 
   longControlState @30 :Car.CarControl.Actuators.LongControlState;
@@ -573,6 +581,16 @@ struct ControlsState @0x97ff69c53601abf1 {
   cumLagMs @15 :Float32;
   canErrorCounter @57 :UInt32;
 
+  decelForModel @63 :Bool;
+  # Road Speed Limiter
+  sccStockCamAct @64 :Float32;
+  sccStockCamStatus @65 :Float32;
+
+  # Ui display
+  steerRatio @60 :Float32;
+  steerRateCost @61 :Float32;
+  steerActuatorDelay @62 :Float32;
+
   lateralControlState :union {
     indiState @52 :LateralINDIState;
     pidState @53 :LateralPIDState;
@@ -580,6 +598,11 @@ struct ControlsState @0x97ff69c53601abf1 {
     angleState @58 :LateralAngleState;
     debugState @59 :LateralDebugState;
   }
+  sccGasFactor @66 :Float32;
+  sccBrakeFactor @67 :Float32;
+  sccCurvatureFactor @68 :Float32;
+  longitudinalActuatorDelayLowerBound @69 :Float32;
+  longitudinalActuatorDelayUpperBound @70 :Float32;
 
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
     disabled @0;
@@ -656,8 +679,6 @@ struct ControlsState @0x97ff69c53601abf1 {
   }
 
   # deprecated
-  vEgoDEPRECATED @0 :Float32;
-  vEgoRawDEPRECATED @32 :Float32;
   aEgoDEPRECATED @1 :Float32;
   canMonoTimeDEPRECATED @16 :UInt64;
   radarStateMonoTimeDEPRECATED @17 :UInt64;
@@ -678,11 +699,9 @@ struct ControlsState @0x97ff69c53601abf1 {
   decelForTurnDEPRECATED @47 :Bool;
   decelForModelDEPRECATED @54 :Bool;
   awarenessStatusDEPRECATED @26 :Float32;
-  angleSteersDEPRECATED @13 :Float32;
   vCurvatureDEPRECATED @46 :Float32;
   mapValidDEPRECATED @49 :Bool;
   jerkFactorDEPRECATED @12 :Float32;
-  steerOverrideDEPRECATED @20 :Bool;
   steeringAngleDesiredDegDEPRECATED @29 :Float32;
 }
 
@@ -1432,6 +1451,18 @@ struct NavRoute {
   }
 }
 
+struct RoadLimitSpeed {
+    active @0 :Int16;
+    roadLimitSpeed @1 :Int16;
+    isHighway @2 :Bool;
+    camType @3 :Int16;
+    camLimitSpeedLeftDist @4 :Int16;
+    camLimitSpeed @5 :Int16;
+    sectionLimitSpeed @6 :Int16;
+    sectionLeftDist @7 :Int16;
+    camSpeedFactor @8 :Float32;
+}
+
 struct Event {
   logMonoTime @0 :UInt64;  # nanoseconds
   valid @67 :Bool = true;
@@ -1449,7 +1480,7 @@ struct Event {
     can @5 :List(CanData);
     controlsState @7 :ControlsState;
     sensorEvents @11 :List(SensorEventData);
-    pandaStates @81 :List(PandaState);
+    pandaStates @12 :List(PandaState);
     peripheralState @80 :PeripheralState;
     radarState @13 :RadarState;
     liveTracks @16 :List(LiveTracks);
@@ -1495,6 +1526,9 @@ struct Event {
     navRoute @83 :NavRoute;
     navThumbnail @84: Thumbnail;
 
+    # neokii
+    roadLimitSpeed @81 :RoadLimitSpeed;
+
     # *********** debug ***********
     testJoystick @52 :Joystick;
 
@@ -1535,6 +1569,5 @@ struct Event {
     kalmanOdometryDEPRECATED @65 :Legacy.KalmanOdometry;
     gpsLocationDEPRECATED @21 :GpsLocationData;
     uiLayoutStateDEPRECATED @57 :Legacy.UiLayoutState;
-    pandaStateDEPRECATED @12 :PandaState;
   }
 }

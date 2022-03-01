@@ -10,7 +10,8 @@ from pathlib import Path
 from common.basedir import BASEDIR
 from common.spinner import Spinner
 from common.text_window import TextWindow
-from selfdrive.hardware import TICI
+from selfdrive.hardware import TICI, EON
+from selfdrive.hardware.eon.apk import update_apks, pm_grant, appops_set
 from selfdrive.swaglog import cloudlog, add_file_handler
 from selfdrive.version import is_dirty
 
@@ -28,7 +29,7 @@ def build(spinner: Spinner, dirty: bool = False) -> None:
   nproc = os.cpu_count()
   j_flag = "" if nproc is None else f"-j{nproc - 1}"
 
-  for retry in [True, False]:
+  for retry in [False]:
     scons = subprocess.Popen(["scons", j_flag, "--cache-populate"], cwd=BASEDIR, env=env, stderr=subprocess.PIPE)
     assert scons.stderr is not None
 
@@ -100,3 +101,10 @@ if __name__ == "__main__" and not PREBUILT:
   spinner = Spinner()
   spinner.update_progress(0, 100)
   build(spinner, is_dirty())
+
+  if EON:
+    update_apks()
+    os.chmod(BASEDIR, 0o755)
+    os.chmod(os.path.join(BASEDIR, "cereal"), 0o755)
+    os.chmod(os.path.join(BASEDIR, "cereal", "libmessaging_shared.so"), 0o755)
+    appops_set("com.neokii.optool", "SU", "allow")

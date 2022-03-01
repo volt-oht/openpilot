@@ -102,9 +102,19 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     driverCameraError @101;
     wideRoadCameraError @102;
     localizerMalfunction @103;
+    #Autohold Activate
+    autoHoldActivated @106;
+
+    #Enable greyPanda
+    startupGreyPanda @107;
+
+    #Road speed Limiter
+    slowingDownSpeed @108;
+    slowingDownSpeedSound @109;
+
     highCpuUsage @105;
-    cruiseMismatch @106;
-    lkasDisabled @107;
+    cruiseMismatch @110;
+    lkasDisabled @111;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -143,6 +153,7 @@ struct CarState {
   vEgoRaw @17 :Float32;     # unfiltered speed from CAN sensors
   yawRate @22 :Float32;     # best estimate of yaw rate
   standstill @18 :Bool;
+  brakeLights @19 :Bool;
   wheelSpeeds @2 :WheelSpeeds;
 
   # gas pedal, 0.0-1.0
@@ -152,11 +163,11 @@ struct CarState {
   # brake pedal, 0.0-1.0
   brake @5 :Float32;      # this is user pedal only
   brakePressed @6 :Bool;  # this is user pedal only
-  brakeHoldActive @38 :Bool;
+  brakeHoldActive @42 :Bool;
 
   # steering wheel
   steeringAngleDeg @7 :Float32;
-  steeringAngleOffsetDeg @37 :Float32; # Offset betweens sensors in case there multiple
+  steeringAngleOffsetDeg @41 :Float32; # Offset betweens sensors in case there multiple
   steeringRateDeg @15 :Float32;
   steeringTorque @8 :Float32;      # TODO: standardize units
   steeringTorqueEps @27 :Float32;  # TODO: standardize units
@@ -187,6 +198,14 @@ struct CarState {
 
   # clutch (manual transmission only)
   clutchPressed @28 :Bool;
+
+  #Kegman 3Bar Distance Profile
+  cruiseGap @37 :Float32;
+  lkMode @38 :Bool;
+  engineRPM @39 :Float32;
+
+  # Autohold for GM
+  autoHoldActivated @40 :Bool;
 
   # which packets this state came from
   canMonoTimes @12: List(UInt64);
@@ -247,7 +266,6 @@ struct CarState {
   }
 
   errorsDEPRECATED @0 :List(CarEvent.EventName);
-  brakeLightsDEPRECATED @19 :Bool;
 }
 
 # ******* radar state @ 20hz *******
@@ -297,13 +315,19 @@ struct CarControl {
   # Any car specific rate limits or quirks applied by
   # the CarController are reflected in actuatorsOutput
   # and matches what is sent to the car
-  actuatorsOutput @10 :Actuators;
+  actuatorsOutput @11 :Actuators;
 
-  roll @8 :Float32;
-  pitch @9 :Float32;
+  roll @9 :Float32;
+  pitch @10 :Float32;
 
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
+
+  sccSmoother @8 :SccSmoother;
+
+  struct SccSmoother {
+    autoTrGap @0 :UInt32;
+  }
 
   struct Actuators {
     # range from 0.0 - 1.0
@@ -357,6 +381,9 @@ struct CarControl {
       seatbeltUnbuckled @5;
       speedTooHigh @6;
       ldw @7;
+
+      # Autohold Event
+      autoHoldActivated @8;
     }
 
     enum AudibleAlert {
@@ -372,6 +399,9 @@ struct CarControl {
       prompt @6;
       promptRepeat @7;
       promptDistracted @8;
+
+      slowingDownSpeed @9;
+      autoHoldOn @10;
     }
   }
 
@@ -389,16 +419,19 @@ struct CarParams {
 
   enableGasInterceptor @2 :Bool;
   pcmCruise @3 :Bool;        # is openpilot's state tied to the PCM's cruise state?
+  enableCamera @4 :Bool;     # supprot white panda
   enableDsu @5 :Bool;        # driving support unit
   enableApgs @6 :Bool;       # advanced parking guidance system
   enableBsm @56 :Bool;       # blind spot monitoring
-  flags @64 :UInt32;         # flags for car specific quirks
+  flags @65 :UInt32;         # flags for car specific quirks
+  # Autohold
+  enableAutoHold @62 :Bool;
 
   minEnableSpeed @7 :Float32;
   minSteerSpeed @8 :Float32;
   maxSteeringAngleDeg @54 :Float32;
-  safetyConfigs @62 :List(SafetyConfig);
-  unsafeMode @65 :Int16;
+  safetyConfigs @63 :List(SafetyConfig);
+  unsafeMode @66 :Int16;
 
   steerMaxBP @11 :List(Float32);
   steerMaxV @12 :List(Float32);
@@ -453,7 +486,7 @@ struct CarParams {
   fingerprintSource @49: FingerprintSource;
   networkLocation @50 :NetworkLocation;  # Where Panda/C2 is integrated into the car's CAN network
 
-  wheelSpeedFactor @63 :Float32; # Multiplier on wheels speeds to computer actual speeds
+  wheelSpeedFactor @64 :Float32; # Multiplier on wheels speeds to computer actual speeds
 
   struct SafetyConfig {
     safetyModel @0 :SafetyModel;
@@ -471,6 +504,10 @@ struct CarParams {
     kiBP @2 :List(Float32);
     kiV @3 :List(Float32);
     kf @4 :Float32;
+
+    #D gain
+    kdBP @5 :List(Float32);
+    kdV @6 :List(Float32);
   }
 
   struct LongitudinalPIDTuning {
@@ -478,9 +515,11 @@ struct CarParams {
     kpV @1 :List(Float32);
     kiBP @2 :List(Float32);
     kiV @3 :List(Float32);
-    kf @6 :Float32;
-    deadzoneBP @4 :List(Float32);
-    deadzoneV @5 :List(Float32);
+    kdBP @4 :List(Float32) = [0.];
+    kdV @5 :List(Float32) = [0.];
+    deadzoneBP @6 :List(Float32);
+    deadzoneV @7 :List(Float32);
+    kf @8 :Float32;
   }
 
   struct LateralINDITuning {
@@ -597,8 +636,7 @@ struct CarParams {
     gateway @1;    # Integration at vehicle's CAN gateway
   }
 
-  enableCameraDEPRECATED @4 :Bool;
-  isPandaBlackDEPRECATED @39 :Bool;
+  isPandaBlack @39: Bool;
   hasStockCameraDEPRECATED @57 :Bool;
   safetyParamDEPRECATED @10 :Int16;
   safetyModelDEPRECATED @9 :SafetyModel;

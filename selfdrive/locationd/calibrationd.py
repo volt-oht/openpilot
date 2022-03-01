@@ -35,8 +35,9 @@ MAX_ALLOWED_SPREAD = np.radians(2)
 RPY_INIT = np.array([0.0,0.0,0.0])
 
 # These values are needed to accommodate biggest modelframe
-PITCH_LIMITS = np.array([-0.09074112085129739, 0.14907572052989657])
-YAW_LIMITS = np.array([-0.06912048084718224, 0.06912048084718235])
+# @qadmus, Volt driver high mount 
+PITCH_LIMITS = np.array([-0.10074112085129739, 0.15907572052989657])
+YAW_LIMITS = np.array([-0.074512048084718224, 0.074512048084718235])
 DEBUG = os.getenv("DEBUG") is not None
 
 

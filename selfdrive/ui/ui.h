@@ -15,7 +15,7 @@
 #include "selfdrive/common/params.h"
 #include "selfdrive/common/timing.h"
 
-const int bdr_s = 30;
+const int bdr_s = 20;
 const int header_h = 420;
 const int footer_h = 280;
 
@@ -91,8 +91,15 @@ typedef struct {
 } line_vertices_data;
 
 typedef struct UIScene {
+
   mat3 view_from_calib;
+  float angleSteers;
+  int engineRPM;
+  bool recording;
+  bool brakeLights;
+  bool engageable, enabled;
   cereal::PandaState::PandaType pandaType;
+  cereal::ControlsState::Reader controls_state;
 
   // modelV2
   float lane_line_probs[4];
@@ -103,6 +110,7 @@ typedef struct UIScene {
 
   // lead
   QPointF lead_vertices[2];
+  bool lead_radar[2] = {false, false};
 
   float light_sensor, accel_sensor, gyro_sensor;
   bool started, ignition, is_metric, longitudinal_control, end_to_end;
@@ -134,6 +142,8 @@ public:
 
   QTransform car_space_transform;
   bool wide_camera;
+
+  bool recording = false;
 
 signals:
   void uiUpdate(const UIState &s);

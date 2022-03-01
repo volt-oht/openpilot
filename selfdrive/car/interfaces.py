@@ -38,6 +38,7 @@ class CarInterfaceBase(ABC):
       self.cp = self.CS.get_can_parser(CP)
       self.cp_cam = self.CS.get_cam_can_parser(CP)
       self.cp_body = self.CS.get_body_can_parser(CP)
+      self.cp_chassis = self.CS.get_chassis_can_parser(CP) #this line for brakeLights
       self.cp_loopback = self.CS.get_loopback_can_parser(CP)
 
     self.CC = None
@@ -50,7 +51,7 @@ class CarInterfaceBase(ABC):
 
   @staticmethod
   @abstractmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None):
+  def get_params(candidate, fingerprint=gen_empty_fingerprint(), has_relay=False, car_fw=None):
     pass
 
   @staticmethod
@@ -69,10 +70,11 @@ class CarInterfaceBase(ABC):
 
   # returns a set of default params to avoid repetition in car specific params
   @staticmethod
-  def get_std_params(candidate, fingerprint):
+  def get_std_params(candidate, fingerprint, has_relay):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
-    ret.unsafeMode = 0  # see panda/board/safety_declarations.h for allowed values
+    ret.unsafeMode = 0  # see safety_declarations.h for allowed values
+    ret.isPandaBlack = has_relay
 
     # standard ALC params
     ret.steerControlType = car.CarParams.SteerControlType.torque
@@ -137,8 +139,8 @@ class CarInterfaceBase(ABC):
       events.add(EventName.speedTooHigh)
     if cs_out.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
-      events.add(EventName.brakeHold)
+    # if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
+    #   events.add(EventName.brakeHold)
 
 
     # Handle permanent and temporary steering faults
@@ -266,6 +268,11 @@ class CarStateBase(ABC):
 
   @staticmethod
   def get_body_can_parser(CP):
+    return None
+
+#bellows are for brakeLights
+  @staticmethod
+  def get_chassis_can_parser(CP):
     return None
 
   @staticmethod

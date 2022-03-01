@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-from cereal import car
+from cereal import car, log
 from math import fabs
+
+from common.numpy_fast import interp
 from selfdrive.config import Conversions as CV
-from selfdrive.car.gm.values import CAR, CruiseButtons, \
-                                    AccState, CarControllerParams
-from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
+from selfdrive.car.gm.values import CAR, Ecu, ECU_FINGERPRINT, CruiseButtons, \
+                                    AccState, FINGERPRINTS, CarControllerParams
+from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, is_ecu_disconnected, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
+from selfdrive.kegman_kans_conf import kegman_kans_conf
 
 ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
@@ -38,8 +41,8 @@ class CarInterface(CarInterfaceBase):
       return CarInterfaceBase.get_steer_feedforward_default
 
   @staticmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None):
-    ret = CarInterfaceBase.get_std_params(candidate, fingerprint)
+  def get_params(candidate, fingerprint=gen_empty_fingerprint(), has_relay=False, car_fw=None):
+    ret = CarInterfaceBase.get_std_params(candidate, fingerprint, has_relay)
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.pcmCruise = False  # stock cruise control is kept off
@@ -52,8 +55,14 @@ class CarInterface(CarInterfaceBase):
     # Presence of a camera on the object bus is ok.
     # Have to go to read_only if ASCM is online (ACC-enabled cars),
     # or camera is on powertrain bus (LKA cars without ACC).
-    ret.openpilotLongitudinalControl = True
+    # for white panda
+    ret.enableCamera = is_ecu_disconnected(fingerprint[0], FINGERPRINTS, ECU_FINGERPRINT, candidate, Ecu.fwdCamera) or has_relay
+    ret.openpilotLongitudinalControl = ret.enableCamera
+
     tire_stiffness_factor = 0.444  # not optimized yet
+
+    # for autohold on ui icon
+    ret.enableAutoHold = 241 in fingerprint[0]
 
     # Start with a baseline lateral tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.minSteerSpeed = 7 * CV.MPH_TO_MS
@@ -61,24 +70,31 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2], [0.00]]
     ret.lateralTuning.pid.kf = 0.00004   # full torque for 20 deg at 80mph means 0.00007818594
     ret.steerRateCost = 1.0
-    ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
+    ret.steerActuatorDelay = 0.1
 
     if candidate == CAR.VOLT:
+      # live tune
+      kegman_kans = kegman_kans_conf()
+      ret.steerMaxBP = [0.]
+      ret.steerMaxV = [float(kegman_kans.conf['steerMax'])]
+      ret.steerLimitTimer = float(kegman_kans.conf['steerLimitTimer'])
+
       # supports stop and go, but initial engage must be above 18mph (which include conservatism)
-      ret.minEnableSpeed = 18 * CV.MPH_TO_MS
+      ret.minEnableSpeed = -1 * CV.MPH_TO_MS
       ret.mass = 1607. + STD_CARGO_KG
       ret.wheelbase = 2.69
-      ret.steerRatio = 17.7  # Stock 15.7, LiveParameters
+      ret.steerRatio = 17.7
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
+      ret.lateralTuning.pid.kiV, ret.lateralTuning.pid.kpV = [[0.0175], [0.185]]
       tire_stiffness_factor = 0.469 # Stock Michelin Energy Saver A/S, LiveParameters
       ret.steerRatioRear = 0.
-      ret.centerToFront = ret.wheelbase * 0.45 # Volt Gen 1, TODO corner weigh
-
-      ret.lateralTuning.pid.kpBP = [0., 40.]
-      ret.lateralTuning.pid.kpV = [0., 0.17]
-      ret.lateralTuning.pid.kiBP = [0.]
-      ret.lateralTuning.pid.kiV = [0.]
+      ret.centerToFront = ret.wheelbase * 0.45  # wild guess
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_volt()
-      ret.steerActuatorDelay = 0.2
+      ret.steerActuatorDelay = 0.225
+
+      # D gain
+      ret.lateralTuning.pid.kdBP = [0., 15., 33.]
+      ret.lateralTuning.pid.kdV = [0.49, 0.65, 0.725]  #corolla from shane fork : 0.725
 
     elif candidate == CAR.MALIBU:
       # supports stop and go, but initial engage must be above 18mph (which include conservatism)
@@ -140,15 +156,24 @@ class CarInterface(CarInterfaceBase):
 
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
     # mass and CG position, so all cars will have approximately similar dyn behaviors
-    ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront,
-                                                                         tire_stiffness_factor=tire_stiffness_factor)
+    ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront, \
+        tire_stiffness_factor=tire_stiffness_factor)
 
-    ret.longitudinalTuning.kpBP = [5., 35.]
-    ret.longitudinalTuning.kpV = [2.4, 1.5]
-    ret.longitudinalTuning.kiBP = [0.]
-    ret.longitudinalTuning.kiV = [0.36]
+    ret.stoppingControl = True
 
-    ret.steerLimitTimer = 0.4
+    ret.longitudinalTuning.deadzoneBP = [0., 100.*CV.KPH_TO_MS]
+    ret.longitudinalTuning.deadzoneV = [0.0, .14]
+
+    ret.longitudinalTuning.kpBP = [-.36 * CV.KPH_TO_MS, 10 * CV.KPH_TO_MS, 20 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kpV = [4.8, 3.5, 3.0, 1.0, 0.7, 0.5]
+    ret.longitudinalTuning.kiBP = [-.36 * CV.KPH_TO_MS, 20 * CV.KPH_TO_MS, 30 * CV.KPH_TO_MS, 50 * CV.KPH_TO_MS, 70 * CV.KPH_TO_MS, 120 * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kiV = [0.5, 0.53, 0.62, 0.7, 0.65, 0.36]
+    ret.longitudinalTuning.kdBP = [-0.1, 15., 33.]
+    ret.longitudinalTuning.kdV = [0.49, 0.75, 1.25]
+    ret.stopAccel = -2.0
+    ret.stoppingDecelRate = 0.8
+    ret.vEgoStopping = 0.36
+    ret.vEgoStarting = 0.35
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
 
     return ret
@@ -156,12 +181,24 @@ class CarInterface(CarInterfaceBase):
   # returns a car.CarState
   def update(self, c, can_strings):
     self.cp.update_strings(can_strings)
-    self.cp_loopback.update_strings(can_strings)
+    self.cp_loopback.update_strings(can_strings) # GM: EPS fault workaround (#22404)
+    # bellow two lines for Brake Light
+    self.cp_chassis.update_strings(can_strings)
+    ret = self.CS.update(self.cp, self.cp_loopback, self.cp_chassis) # GM: EPS fault workaround (#22404)
 
-    ret = self.CS.update(self.cp, self.cp_loopback)
+    #brake autohold
+    if not self.CS.autoholdBrakeStart and self.CS.brakePressVal > 40.0:
+      self.CS.autoholdBrakeStart = True
 
-    ret.canValid = self.cp.can_valid and self.cp_loopback.can_valid
+    cruiseEnabled = self.CS.pcm_acc_status != AccState.OFF
+    ret.cruiseState.enabled = cruiseEnabled
+
+    ret.cruiseGap = self.CS.follow_level
+
+    ret.canValid = self.cp.can_valid and self.cp_loopback.can_valid # GM: EPS fault workaround (#22404)
     ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
+
+    ret.engineRPM = self.CS.engineRPM
 
     buttonEvents = []
 
@@ -177,7 +214,9 @@ class CarInterface(CarInterfaceBase):
       if but == CruiseButtons.RES_ACCEL:
         if not (ret.cruiseState.enabled and ret.standstill):
           be.type = ButtonType.accelCruise  # Suppress resume button if we're resuming from stop so we don't adjust speed.
-      elif but == CruiseButtons.DECEL_SET:
+      elif but == CruiseButtons.SET_DECEL:
+        if not cruiseEnabled and not self.CS.lkMode:
+          self.lkMode = True
         be.type = ButtonType.decelCruise
       elif but == CruiseButtons.CANCEL:
         be.type = ButtonType.cancel
@@ -187,6 +226,40 @@ class CarInterface(CarInterfaceBase):
 
     ret.buttonEvents = buttonEvents
 
+    if cruiseEnabled and self.CS.lka_button and self.CS.lka_button != self.CS.prev_lka_button:
+      self.CS.lkMode = not self.CS.lkMode
+
+    if self.CS.distance_button and self.CS.distance_button != self.CS.prev_distance_button:
+       self.CS.follow_level -= 1
+       if self.CS.follow_level < 1:
+         self.CS.follow_level = 3
+
+    events = self.create_common_events(ret, pcm_enable=False)
+
+    if ret.vEgo < self.CP.minEnableSpeed and self.CS.pcm_acc_status != AccState.ACTIVE:
+      events.add(EventName.belowEngageSpeed)
+    if self.CS.park_brake:
+      events.add(EventName.parkBrake)
+	#autohold event
+    if self.CS.autoHoldActivated:
+      events.add(car.CarEvent.EventName.autoHoldActivated)
+
+    # handle button presses
+    for b in ret.buttonEvents:
+      # do enable on both accel and decel buttons
+      if b.type in [ButtonType.accelCruise, ButtonType.decelCruise] and not b.pressed:
+        events.add(EventName.buttonEnable)
+      # do disable on button down
+      if b.type == ButtonType.cancel and b.pressed:
+        events.add(EventName.buttonCancel)
+
+    ret.events = events.to_msg()
+
+    # copy back carState packet to CS
+    self.CS.out = ret.as_reader()
+
+    return self.CS.out
+
     events = self.create_common_events(ret, pcm_enable=False)
 
     if ret.vEgo < self.CP.minEnableSpeed:
@@ -195,10 +268,13 @@ class CarInterface(CarInterfaceBase):
       events.add(EventName.parkBrake)
     if ret.cruiseState.standstill:
       events.add(EventName.resumeRequired)
-    if self.CS.pcm_acc_status == AccState.FAULTED:
-      events.add(EventName.accFaulted)
-    if ret.vEgo < self.CP.minSteerSpeed:
-      events.add(car.CarEvent.EventName.belowSteerSpeed)
+
+    # autohold on ui icon
+    if self.CS.autoHoldActivated == True:
+      ret.autoHoldActivated = 1
+
+    if self.CS.autoHoldActivated == False:
+      ret.autoHoldActivated = 0
 
     # handle button presses
     for b in ret.buttonEvents:
@@ -232,4 +308,15 @@ class CarInterface(CarInterfaceBase):
                          hud_control.leadVisible, hud_control.visualAlert)
 
     self.frame += 1
+
+    # Release Auto Hold and creep smoothly when regenpaddle pressed
+    if (self.CS.regenPaddlePressed or (self.CS.brakePressVal > 9.0 and self.CS.prev_brakePressVal < self.CS.brakePressVal)) and self.CS.autoHold:
+      self.CS.autoHoldActive = False
+      self.CS.autoholdBrakeStart = False
+
+    if self.CS.autoHold and not self.CS.autoHoldActive and not self.CS.regenPaddlePressed:
+      if self.CS.out.vEgo > 0.02:
+        self.CS.autoHoldActive = True
+      elif self.CS.out.vEgo < 0.01 and self.CS.out.brakePressed:
+        self.CS.autoHoldActive = True
     return ret

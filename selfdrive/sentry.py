@@ -9,6 +9,8 @@ from selfdrive.hardware import HARDWARE, PC
 from selfdrive.swaglog import cloudlog
 from selfdrive.version import get_branch, get_commit, get_origin, get_version, \
                               is_comma_remote, is_dirty, is_tested_branch
+import datetime
+import traceback
 
 
 class SentryProject(Enum):
@@ -30,6 +32,13 @@ def report_tombstone(fn: str, message: str, contents: str) -> None:
 
 def capture_exception(*args, **kwargs) -> None:
   cloudlog.error("crash", exc_info=kwargs.get('exc_info', 1))
+
+  try:
+    with open('/data/log/last_exception', 'w') as f:
+      now = datetime.datetime.now()
+      f.write(now.strftime('[%Y-%m-%d %H:%M:%S]') + "\n\n" + str(traceback.format_exc()))
+  except Exception:
+    pass
 
   try:
     sentry_sdk.capture_exception(*args, **kwargs)

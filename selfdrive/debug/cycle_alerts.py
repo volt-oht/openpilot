@@ -8,7 +8,7 @@ import time
 from cereal import car, log
 import cereal.messaging as messaging
 from common.realtime import DT_CTRL
-from selfdrive.car.honda.interface import CarInterface
+from selfdrive.car.gm.interface import CarInterface
 from selfdrive.controls.lib.events import ET, EVENTS, Events
 from selfdrive.controls.lib.alertmanager import AlertManager
 
@@ -33,7 +33,7 @@ def cycle_alerts(duration=200, is_metric=False):
     (EventName.driverDistracted, ET.WARNING),
   ]
 
-  CP = CarInterface.get_params("HONDA CIVIC 2016")
+  CP = CarInterface.get_params("CHEVROLET VOLT PREMIER 2017")
   sm = messaging.SubMaster(['deviceState', 'pandaStates', 'roadCameraState', 'modelV2', 'liveCalibration',
                             'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman'])
 

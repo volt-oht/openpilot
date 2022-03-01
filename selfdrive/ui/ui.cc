@@ -50,7 +50,10 @@ static void update_leads(UIState *s, const cereal::RadarState::Reader &radar_sta
     if (lead_data.getStatus()) {
       float z = line.getZ()[get_path_length_idx(line, lead_data.getDRel())];
       calib_frame_to_full_frame(s, lead_data.getDRel(), -lead_data.getYRel(), z + 1.22, &s->scene.lead_vertices[i]);
+      s->scene.lead_radar[i] = lead_data.getRadar();
     }
+    else
+      s->scene.lead_radar[i] = false;
   }
 }
 
@@ -151,6 +154,9 @@ static void update_state(UIState *s) {
   if (sm.updated("carParams")) {
     scene.longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
   }
+  if (sm.updated("carState")) {
+    scene.engineRPM = sm["carState"].getCarState().getEngineRPM();
+  }
   if (!scene.started && sm.updated("sensorEvents")) {
     for (auto sensor : sm["sensorEvents"].getSensorEvents()) {
       if (sensor.which() == cereal::SensorEventData::ACCELERATION) {
@@ -191,19 +197,23 @@ static void update_state(UIState *s) {
 }
 
 void ui_update_params(UIState *s) {
-  s->scene.is_metric = Params().getBool("IsMetric");
+  Params params;
+  s->scene.is_metric = params.getBool("IsMetric");
+  // s->custom_lead_mark = true; // params.getBool("CustomLeadMark");
 }
 
 void UIState::updateStatus() {
   if (scene.started && sm->updated("controlsState")) {
     auto controls_state = (*sm)["controlsState"].getControlsState();
     auto alert_status = controls_state.getAlertStatus();
+    scene.engageable = controls_state.getEngageable();
     if (alert_status == cereal::ControlsState::AlertStatus::USER_PROMPT) {
       status = STATUS_WARNING;
     } else if (alert_status == cereal::ControlsState::AlertStatus::CRITICAL) {
       status = STATUS_ALERT;
     } else {
       status = controls_state.getEnabled() ? STATUS_ENGAGED : STATUS_DISENGAGED;
+      scene.enabled = controls_state.getEnabled();
     }
   }
 
@@ -224,7 +234,7 @@ UIState::UIState(QObject *parent) : QObject(parent) {
   sm = std::make_unique<SubMaster, const std::initializer_list<const char *>>({
     "modelV2", "controlsState", "liveCalibration", "radarState", "deviceState", "roadCameraState",
     "pandaStates", "carParams", "driverMonitoringState", "sensorEvents", "carState", "liveLocationKalman",
-    "wideRoadCameraState",
+    "wideRoadCameraState", "gpsLocationExternal", "carControl", "liveParameters", "roadLimitSpeed",
   });
 
   Params params;
