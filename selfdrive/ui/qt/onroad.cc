@@ -334,36 +334,36 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   }
 }
 
-int OnroadHud::leftSideElement(QPainter &p, int x, int y, const char* value, const char* label, const char* units, QColor &color) {
-  configFont(p, "Open Sans", 42, "Regular");
+int OnroadHud::leftSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color) {
+  configFont(p, "Open Sans", 46, "Regular");
   drawTextColor(p, x + 90, y + 40, QString(value), color);
-  configFont(p, "Open Sans", 30, "Regular");
+  configFont(p, "Open Sans", 32, "Regular");
   drawText(p, x + 90, y + 76, QString(label), 255);
 
-  if (strlen(units) > 0) {
+  /* if (strlen(units) > 0) {
     p.save();
     p.translate(x + 173, y + 52);
     p.rotate(-90);
     drawText(p, 0, 0, QString(units), 255);
     p.restore();
-  }
+  } */
 
   return 110;
 }
 
-int OnroadHud::rightSideElement(QPainter &p, int x, int y, const char* value, const char* label, const char* units, QColor &color) {
+int OnroadHud::rightSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color) {
   configFont(p, "Open Sans", 46, "SemiBold");
   drawTextColor(p, x + 90, y + 40, QString(value), color);
-  configFont(p, "Open Sans", 30, "Regular");
+  configFont(p, "Open Sans", 32, "Regular");
   drawText(p, x + 90, y + 76, QString(label), 255);
 
-  if (strlen(units) > 0) {
+  /* if (strlen(units) > 0) {
     p.save();
     p.translate(x + 173, y + 52);
     p.rotate(-90);
     drawText(p, 0, 0, QString(units), 255);
     p.restore();
-  }
+  } */
 
   return 110;
 }
@@ -387,7 +387,7 @@ void OnroadHud::drawLeftDevUi(QPainter &p, int x, int y) {
     } else {
       snprintf(val_str, sizeof(val_str), "-");
     }
-    rh += leftSideElement(p, x, ry, val_str, "차간 거리", "", valueColor);
+    rh += leftSideElement(p, x, ry, val_str, "차간 거리", valueColor);
     ry = y + rh;
   }
 
@@ -406,7 +406,7 @@ void OnroadHud::drawLeftDevUi(QPainter &p, int x, int y) {
      } else {
        snprintf(val_str, sizeof(val_str), "N/A");
      }
-    rh += leftSideElement(p, x, ry, val_str, "차간 속도", "", valueColor);
+    rh += leftSideElement(p, x, ry, val_str, "차간 속도", valueColor);
     ry = y + rh;
   }
 
@@ -438,7 +438,7 @@ void OnroadHud::drawRightDevUi(QPainter &p, int x, int y) {
     }
     // temp is alway in °C
     snprintf(val_str, sizeof(val_str), "%.1f%s", cpuTemp, "°");
-    rh += rightSideElement(p, x, ry, val_str, "CPU온도", "", valueColor);
+    rh += rightSideElement(p, x, ry, val_str, "CPU온도", valueColor);
     ry = y + rh;
   }
   // Real Steering Angle
@@ -447,7 +447,7 @@ void OnroadHud::drawRightDevUi(QPainter &p, int x, int y) {
     char val_str[8];
     valueColor = limeColor;
     snprintf(val_str, sizeof(val_str), "%.0f%s%s", angleSteers , "°", "");
-    rh += rightSideElement(p, x, ry, val_str, "핸들각", "", valueColor);
+    rh += rightSideElement(p, x, ry, val_str, "핸들각", valueColor);
     ry = y + rh;
   }
 
@@ -457,7 +457,7 @@ void OnroadHud::drawRightDevUi(QPainter &p, int x, int y) {
     char val_str[8];
     valueColor = limeColor;
     snprintf(val_str, sizeof(val_str), "%.0f%s%s", steerAngleDesired, "°", "");
-    rh += rightSideElement(p, x, ry, val_str, "경로각", "", valueColor);
+    rh += rightSideElement(p, x, ry, val_str, "경로각", valueColor);
     ry = y + rh;
   }
 
@@ -474,7 +474,7 @@ void OnroadHud::drawRightDevUi(QPainter &p, int x, int y) {
     else {
       snprintf(val_str, sizeof(val_str), "%.0f", rpm);
     }
-    rh += rightSideElement(p, x, ry, val_str, "RPM", "", valueColor);
+    rh += rightSideElement(p, x, ry, val_str, "RPM", valueColor);
     ry = y + rh;
   }
 

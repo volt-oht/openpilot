@@ -44,8 +44,8 @@ private:
   void paintEvent(QPaintEvent *event) override;
   void drawRightDevUi(QPainter &p, int x, int y);
   void drawLeftDevUi(QPainter &p, int x, int y);
-  int rightSideElement(QPainter &p, int x, int y, const char* value, const char* label, const char* units, QColor &color);
-  int leftSideElement(QPainter &p, int x, int y, const char* value, const char* label, const char* units, QColor &color);
+  int rightSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color);
+  int leftSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color);
 
   QPixmap engage_img;
   QPixmap dm_img;
