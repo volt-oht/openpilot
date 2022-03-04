@@ -310,8 +310,10 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   p.setOpacity(1.0);
 
   // N direction icon (upper right 3)
-  x = rect().right() - (radius / 2) - (bdr_s * 2) - (radius * 3);
-  y = radius / 2 + bdr_s;
+  x = radius / 2 + (bdr_s * 2) + (radius + 50);
+  y = rect().bottom() - footer_h / 2 - 10;
+  // x = rect().right() - (radius / 2) - (bdr_s * 2) - (radius * 3);
+  // y = radius / 2 + bdr_s;
   drawNrotate(p, x, y, direction_img, iconbgColor, gps_status ? 1.0 : 0.2);
   p.setOpacity(1.0);
 
@@ -335,7 +337,7 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
 }
 
 int OnroadHud::leftSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color) {
-  configFont(p, "Open Sans", 46, "Regular");
+  configFont(p, "Open Sans", 44, "Regular");
   drawTextColor(p, x + 90, y + 40, QString(value), color);
   configFont(p, "Open Sans", 32, "Regular");
   drawText(p, x + 90, y + 76, QString(label), 255);
@@ -352,7 +354,7 @@ int OnroadHud::leftSideElement(QPainter &p, int x, int y, const char* value, con
 }
 
 int OnroadHud::rightSideElement(QPainter &p, int x, int y, const char* value, const char* label, QColor &color) {
-  configFont(p, "Open Sans", 46, "SemiBold");
+  configFont(p, "Open Sans", 45, "SemiBold");
   drawTextColor(p, x + 90, y + 40, QString(value), color);
   configFont(p, "Open Sans", 32, "Regular");
   drawText(p, x + 90, y + 76, QString(label), 255);
@@ -383,9 +385,9 @@ void OnroadHud::drawLeftDevUi(QPainter &p, int x, int y) {
     valueColor = whiteColor;
 
     if (lead_status) {
-      snprintf(val_str, sizeof(val_str), "%d%s", (int)lead_d_rel, "미터");
+      snprintf(val_str, sizeof(val_str), "%d%s", (int)lead_d_rel, "m");
     } else {
-      snprintf(val_str, sizeof(val_str), "-");
+      snprintf(val_str, sizeof(val_str), "N/A");
     }
     rh += leftSideElement(p, x, ry, val_str, "차간 거리", valueColor);
     ry = y + rh;
@@ -771,7 +773,7 @@ void NvgWindow::drawBottomIcons(QPainter &p) {
   auto car_state = sm["carState"].getCarState();
   auto scc_smoother = sm["carControl"].getCarControl().getSccSmoother();
 
-  int x = radius / 2 + (bdr_s * 2) + (radius + 50);
+  int x = radius / 2 + (bdr_s * 2) + (radius + 50) * 4;
   const int y = rect().bottom() - footer_h / 2 - 10;
 
   // cruise gap
@@ -1032,7 +1034,7 @@ void NvgWindow::drawDebugText(QPainter &p) {
   p.drawText(text_x, y, str);
 
   y += height;
-  p.setPen(QColor(0, 255, 0, 200));
+  p.setPen(QColor(120, 255, 120, 255));
   str.sprintf("Accel: %.3f\n", accel);
   p.drawText(text_x, y, str);
 }
