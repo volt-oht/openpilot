@@ -82,8 +82,13 @@ void Sidebar::updateState(const UIState &s) {
     pandaStatus = {"GPS\nSEARCHING", warning_color};
   }*/
   setProperty("pandaStatus", QVariant::fromValue(pandaStatus));
-  m_battery_img = deviceState.getBatteryStatus() == "Charging" ? 1 : 0;
-  m_batteryPercent = deviceState.getBatteryPercent();
+
+  QString battStatus = "DisCharging";
+  std::string m_battery_stat = s.scene.deviceState.getBatteryStatus();
+  battStatus = QString::fromUtf8(m_battery_stat.c_str());
+
+  setProperty("battStatus", battStatus);
+  setProperty("battPercent", (int)deviceState.getBatteryPercent());
 }
 
 void Sidebar::paintEvent(QPaintEvent *event) {
@@ -107,22 +112,6 @@ void Sidebar::paintEvent(QPaintEvent *event) {
     x += 37;
   }
 
-  //battery
-  QRect  rect(45, 293, 96, 36);
-  QRect  bq(50, 298, int(76* m_batteryPercent * 0.01), 25);
-  QBrush bgBrush("#149948");
-  p.fillRect(bq, bgBrush);
-  p.drawPixmap(rect, battery_imgs[m_battery_img]);
-
-  p.setPen(Qt::white);
-  configFont(p, "Open Sans", 30, "Regular");
-
-  char battery_str[5];
-
-  const QRect bt = QRect(170, 288, event->rect().width(), 50);
-  snprintf(battery_str, sizeof(battery_str), "%d%%", m_batteryPercent);
-  p.drawText(bt, Qt::AlignLeft, battery_str);
-
   configFont(p, "Open Sans", 31, "Regular");
   p.setPen(QColor(0xff, 0xff, 0xff));
   const QRect r = QRect(20, 237, 250, 50);
@@ -131,6 +120,22 @@ void Sidebar::paintEvent(QPaintEvent *event) {
     p.drawText(r, Qt::AlignCenter, wifi_addr);
   else
     p.drawText(r, Qt::AlignCenter, net_type);
+
+  //battery
+  QRect  rect(45, 293, 96, 36);
+  QRect  bq(50, 298, int(76* bat_Percent * 0.01), 25);
+  QBrush bgBrush("#149948");
+  p.fillRect(bq, bgBrush);
+  p.drawPixmap(rect, battery_imgs[bat_Status == "Charging" ? 1 : 0]);
+
+  p.setPen(Qt::white);
+  configFont(p, "Open Sans", 30, "Regular");
+
+  char battery_str[32];
+
+  const QRect bt = QRect(170, 288, event->rect().width(), 50);
+  snprintf(battery_str, sizeof(battery_str), "%d%%", bat_Percent);
+  p.drawText(bt, Qt::AlignLeft, battery_str);
 
   // metrics
   configFont(p, "Open Sans", 35, "Regular");

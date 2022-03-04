@@ -100,6 +100,7 @@ typedef struct UIScene {
   bool engageable, enabled;
   cereal::PandaState::PandaType pandaType;
   cereal::ControlsState::Reader controls_state;
+  cereal::DeviceState::Reader deviceState;
 
   // modelV2
   float lane_line_probs[4];
