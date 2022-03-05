@@ -10,6 +10,8 @@ from common.realtime import sec_since_boot
 from selfdrive.hardware import HARDWARE
 from selfdrive.swaglog import cloudlog
 from selfdrive.statsd import statlog
+from selfdrive.kegman_kans_conf import kegman_kans_conf
+kegman_kans = kegman_kans_conf()
 
 PANDA_OUTPUT_VOLTAGE = 5.28
 CAR_VOLTAGE_LOW_PASS_K = 0.091 # LPF gain for 5s tau (dt/tau / (dt/tau + 1))
@@ -191,11 +193,11 @@ class PowerMonitoring:
 
     now = sec_since_boot()
     panda_charging = (peripheralState.usbPowerMode != log.PeripheralState.UsbPowerMode.client)
-    BATT_PERC_OFF = 10
+    BATT_PERC_OFF = int(kegman_kans.conf['battPercOff'])
 
     should_shutdown = False
     # Wait until we have shut down charging before powering down
     should_shutdown |= (not panda_charging and self.should_disable_charging(ignition, in_car, offroad_timestamp))
-    should_shutdown |= ((HARDWARE.get_battery_capacity() < BATT_PERC_OFF) and (not HARDWARE.get_battery_charging()) and ((now - offroad_timestamp) > 60))
+    should_shutdown |= ((HARDWARE.get_battery_capacity() < BATT_PERC_OFF) and (not HARDWARE.get_battery_charging()) and ((now - offroad_timestamp) > 600))
     should_shutdown &= started_seen or (now > MIN_ON_TIME_S)
     return should_shutdown
