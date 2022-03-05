@@ -9,17 +9,14 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import psutil
-from smbus2 import SMBus
 
 import cereal.messaging as messaging
 from cereal import log
 from common.dict_helpers import strip_deprecated_keys
 from common.filter_simple import FirstOrderFilter
-from common.numpy_fast import interp
 from common.params import Params
 from common.realtime import DT_TRML, sec_since_boot
 from selfdrive.controls.lib.alertmanager import set_offroad_alert
-from selfdrive.controls.lib.pid import PIDController
 from selfdrive.hardware import EON, HARDWARE, PC, TICI
 from selfdrive.loggerd.config import get_available_percent
 from selfdrive.statsd import statlog
@@ -27,6 +24,7 @@ from selfdrive.kegman_kans_conf import kegman_kans_conf
 kegman_kans = kegman_kans_conf()
 from selfdrive.swaglog import cloudlog
 from selfdrive.thermald.power_monitoring import PowerMonitoring
+from selfdrive.thermald.fan_controller import EonFanController, UnoFanController, TiciFanController
 from selfdrive.version import terms_version, training_version
 
 ThermalStatus = log.DeviceState.ThermalStatus
@@ -75,101 +73,6 @@ def read_thermal(thermal_config):
   return dat
 
 
-def setup_eon_fan():
-  os.system("echo 2 > /sys/module/dwc3_msm/parameters/otg_switch")
-
-
-last_eon_fan_val = None
-def set_eon_fan(val):
-  global last_eon_fan_val
-
-  if last_eon_fan_val is None or last_eon_fan_val != val:
-    bus = SMBus(7, force=True)
-    try:
-      i = [0x1, 0x3 | 0, 0x3 | 0x08, 0x3 | 0x10][val]
-      bus.write_i2c_block_data(0x3d, 0, [i])
-    except OSError:
-      # tusb320
-      if val == 0:
-        bus.write_i2c_block_data(0x67, 0xa, [0])
-      else:
-        bus.write_i2c_block_data(0x67, 0xa, [0x20])
-        bus.write_i2c_block_data(0x67, 0x8, [(val - 1) << 6])
-    bus.close()
-    last_eon_fan_val = val
-
-
-# temp thresholds to control fan speed - high hysteresis
-_TEMP_THRS_H = [50., 65., 80., 10000]
-# temp thresholds to control fan speed - low hysteresis
-_TEMP_THRS_L = [42.5, 57.5, 72.5, 10000]
-# fan speed options
-_FAN_SPEEDS = [0, 16384, 32768, 65535]
-
-
-def handle_fan_eon(controller, max_cpu_temp, fan_speed, ignition):
-  new_speed_h = next(speed for speed, temp_h in zip(_FAN_SPEEDS, _TEMP_THRS_H) if temp_h > max_cpu_temp)
-  new_speed_l = next(speed for speed, temp_l in zip(_FAN_SPEEDS, _TEMP_THRS_L) if temp_l > max_cpu_temp)
-
-  if new_speed_h > fan_speed:
-    # update speed if using the high thresholds results in fan speed increment
-    fan_speed = new_speed_h
-  elif new_speed_l < fan_speed:
-    # update speed if using the low thresholds results in fan speed decrement
-    fan_speed = new_speed_l
-
-  set_eon_fan(fan_speed // 16384)
-
-  return fan_speed
-
-
-def handle_fan_uno(controller, max_cpu_temp, fan_speed, ignition):
-  new_speed = int(interp(max_cpu_temp, [40.0, 80.0], [0, 80]))
-
-  if not ignition:
-    new_speed = min(30, new_speed)
-
-  return new_speed
-
-
-last_ignition = False
-def handle_fan_tici(controller, max_cpu_temp, fan_speed, ignition):
-  global last_ignition
-
-  controller.neg_limit = -(80 if ignition else 30)
-  controller.pos_limit = -(30 if ignition else 0)
-
-  if ignition != last_ignition:
-    controller.reset()
-
-  fan_pwr_out = -int(controller.update(
-                     setpoint=75,
-                     measurement=max_cpu_temp,
-                     feedforward=interp(max_cpu_temp, [60.0, 100.0], [0, -80])
-                  ))
-
-  last_ignition = ignition
-  return fan_pwr_out
-
-# from bellow line, to control charging disabled
-def check_car_battery_voltage(should_start, pandaStates, charging_disabled, msg):
-  sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "managerState"])
-  sm.update(0)
-  peripheralState = sm['peripheralState']
-  print(pandaStates)
-
-  if charging_disabled and msg.deviceState.batteryPercent < int(kegman_kans.conf['battChargeMin']):
-    charging_disabled = False
-    os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
-  # elif not charging_disabled and (msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']) or (pandaStates is not None and peripheralState.voltage < int(kegman_kans.conf['carVoltageMinEonShutdown']) and not should_start)):
-  #   charging_disabled = True
-  #   os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
-  elif msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']):
-    charging_disabled = True
-    os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
-
-  return charging_disabled # to this line
-
 def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_text: Optional[str]=None):
   if prev_offroad_states.get(offroad_alert, None) == (show_alert, extra_text):
     return
@@ -181,20 +84,25 @@ def hw_state_thread(end_event, hw_queue):
   """Handles non critical hardware state, and sends over queue"""
   count = 0
   registered_count = 0
+  prev_hw_state = None
 
   while not end_event.is_set():
     # these are expensive calls. update every 10s
     if (count % int(10. / DT_TRML)) == 0:
       try:
         network_type = HARDWARE.get_network_type()
+        modem_temps = HARDWARE.get_modem_temperatures()
+        if len(modem_temps) == 0 and prev_hw_state is not None:
+          modem_temps = prev_hw_state.modem_temps
 
         hw_state = HardwareState(
           network_type=network_type,
           network_strength=HARDWARE.get_network_strength(network_type),
           network_info=HARDWARE.get_network_info(),
           nvme_temps=HARDWARE.get_nvme_temperatures(),
-          modem_temps=HARDWARE.get_modem_temperatures(),
           wifi_address=HARDWARE.get_ip_address(),
+          modem_temps=modem_temps,
+
         )
 
         try:
@@ -212,8 +120,9 @@ def hw_state_thread(end_event, hw_queue):
           os.system("nmcli conn up lte")
           registered_count = 0
 
+        prev_hw_state = hw_state
       except Exception:
-        cloudlog.exception("Error getting network status")
+        cloudlog.exception("Error getting hardware state")
 
     count += 1
     time.sleep(DT_TRML)
@@ -223,7 +132,6 @@ def thermald_thread(end_event, hw_queue):
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "controlsState", "pandaStates"], poll=["pandaStates"])
 
-  fan_speed = 0
   count = 0
 
   onroad_conditions: Dict[str, bool] = {
@@ -252,7 +160,6 @@ def thermald_thread(end_event, hw_queue):
   charging_disabled = False
   should_start_prev = False
   in_car = False
-  handle_fan = None
   is_uno = False
   has_relay = False
   engaged_prev = False
@@ -263,11 +170,11 @@ def thermald_thread(end_event, hw_queue):
   HARDWARE.initialize_hardware()
   thermal_config = HARDWARE.get_thermal_config()
 
+  # neokii
   restart_triggered_ts = 0.
   panda_state_ts = 0.
 
-  # TODO: use PI controller for UNO
-  controller = PIDController(k_p=0, k_i=2e-3, neg_limit=-80, pos_limit=0, rate=(1 / DT_TRML))
+  fan_controller = None
 
   while not end_event.is_set():
     sm.update(PANDA_STATES_TIMEOUT)
@@ -302,20 +209,16 @@ def thermald_thread(end_event, hw_queue):
       usb_power = peripheralState.usbPowerMode != log.PeripheralState.UsbPowerMode.client
 
       # Setup fan handler on first connect to panda
-      if handle_fan is None and peripheralState.pandaType != log.PandaState.PandaType.unknown:
+      if fan_controller is None and peripheralState.pandaType != log.PandaState.PandaType.unknown:
         is_uno = peripheralState.pandaType == log.PandaState.PandaType.uno
         has_relay = peripheralState.pandaType in [log.PandaState.PandaType.blackPanda, log.PandaState.PandaType.uno, log.PandaState.PandaType.dos]
 
         if TICI:
-          cloudlog.info("Setting up TICI fan handler")
-          handle_fan = handle_fan_tici
+          fan_controller = TiciFanController()
         elif is_uno or PC:
-          cloudlog.info("Setting up UNO fan handler")
-          handle_fan = handle_fan_uno
+          fan_controller = UnoFanController()
         else:
-          cloudlog.info("Setting up EON fan handler")
-          setup_eon_fan()
-          handle_fan = handle_fan_eon
+          fan_controller = EonFanController()
 
     # neokii
     else:
@@ -354,9 +257,8 @@ def thermald_thread(end_event, hw_queue):
       max(max(msg.deviceState.cpuTempC), msg.deviceState.memoryTempC, max(msg.deviceState.gpuTempC))
     )
 
-    if handle_fan is not None:
-      fan_speed = handle_fan(controller, max_comp_temp, fan_speed, onroad_conditions["ignition"])
-      msg.deviceState.fanSpeedPercentDesired = fan_speed
+    if fan_controller is not None:
+      msg.deviceState.fanSpeedPercentDesired = fan_controller.update(max_comp_temp, onroad_conditions["ignition"])
 
     is_offroad_for_5_min = (started_ts is None) and ((not started_seen) or (off_ts is None) or (sec_since_boot() - off_ts > 60 * 5))
     if max_comp_temp > 105. or (has_relay and is_offroad_for_5_min and max_comp_temp > OFFROAD_DANGER_TEMP):
