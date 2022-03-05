@@ -14,7 +14,7 @@ ACCEL_MAX_ISO = 2.0  # m/s^2
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
-                             v_target_future, v_pid, brake_pressed, cruise_standstill):
+                             v_target_future, v_pid, brake_pressed, cruise_standstill, radarState):
   """Update longitudinal control state machine"""
   accelerating = v_target_future > v_target
   stopping_condition = (v_ego < 2.0 and cruise_standstill) or \
@@ -97,7 +97,7 @@ class LongControl():
     output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans(CP, active, self.long_control_state, CS.vEgo,
                                                        v_target, v_target_future, self.v_pid, CS.brakePressed,
-                                                       CS.cruiseState.standstill)
+                                                       CS.cruiseState.standstill, radarState)
 
     if self.long_control_state == LongCtrlState.off or CS.gasPressed:
       self.reset(CS.vEgo)
