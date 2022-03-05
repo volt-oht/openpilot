@@ -82,12 +82,7 @@ void Sidebar::updateState(const UIState &s) {
     pandaStatus = {"GPS\nSEARCHING", warning_color};
   }*/
   setProperty("pandaStatus", QVariant::fromValue(pandaStatus));
-
-  QString battStatus = "DisCharging";
-  std::string m_battery_stat = s.scene.deviceState.getBatteryStatus();
-  battStatus = QString::fromUtf8(m_battery_stat.c_str());
-
-  setProperty("battStatus", battStatus);
+  m_battery_img = deviceState.getBatteryStatus() == "Charging" ? 1 : 0;
   setProperty("battPercent", (int)deviceState.getBatteryPercent());
 }
 
@@ -126,7 +121,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   QRect  bq(50, 298, int(76* bat_Percent * 0.01), 25);
   QBrush bgBrush("#149948");
   p.fillRect(bq, bgBrush);
-  p.drawPixmap(rect, battery_imgs[bat_Status == "Charging" ? 1 : 0]);
+  p.drawPixmap(rect, battery_imgs[m_battery_img]);
 
   p.setPen(Qt::white);
   configFont(p, "Open Sans", 30, "Regular");

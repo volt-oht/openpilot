@@ -17,7 +17,6 @@ class Sidebar : public QFrame {
   Q_PROPERTY(QString netType MEMBER net_type NOTIFY valueChanged);
   Q_PROPERTY(int netStrength MEMBER net_strength NOTIFY valueChanged);
   Q_PROPERTY(QString wifiAddr MEMBER wifi_addr NOTIFY valueChanged);
-  Q_PROPERTY(QString battStatus MEMBER bat_Status NOTIFY valueChanged);
   Q_PROPERTY(int battPercent MEMBER bat_Percent NOTIFY valueChanged);
 
 public:
@@ -58,8 +57,8 @@ protected:
   QString wifi_addr = "──";
 
   //battery
-  QString bat_Status = "DisCharging";
   int bat_Percent = 0;
+  int m_battery_img;
 
   const QMap<int, QPixmap> battery_imgs = {
     {0, QPixmap("../assets/images/battery.png")},
