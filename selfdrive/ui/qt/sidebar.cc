@@ -83,7 +83,7 @@ void Sidebar::updateState(const UIState &s) {
   }*/
   setProperty("pandaStatus", QVariant::fromValue(pandaStatus));
   m_battery_img = deviceState.getBatteryStatus() == "Charging" ? 1 : 0;
-  setProperty("battPercent", (int)deviceState.getBatteryPercent());
+  m_batteryPercent = deviceState.getBatteryPercent();
 }
 
 void Sidebar::paintEvent(QPaintEvent *event) {
@@ -118,7 +118,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
 
   //battery
   QRect  rect(45, 293, 96, 36);
-  QRect  bq(50, 298, int(76* bat_Percent * 0.01), 25);
+  QRect  bq(50, 298, int(76* m_batteryPercent * 0.01), 25);
   QBrush bgBrush("#149948");
   p.fillRect(bq, bgBrush);
   p.drawPixmap(rect, battery_imgs[m_battery_img]);
@@ -130,7 +130,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   char battery_str[32];
 
   const QRect bt = QRect(170, 288, event->rect().width(), 50);
-  snprintf(battery_str, sizeof(battery_str), "%d%%", bat_Percent);
+  snprintf(battery_str, sizeof(battery_str), "%d%%", m_batteryPercent);
   p.drawText(bt, Qt::AlignLeft, battery_str);
 
   // metrics

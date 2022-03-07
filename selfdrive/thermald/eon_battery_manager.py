@@ -22,14 +22,13 @@ def setEONChargingStatus(car_voltage_mV, batteryPercent) :
             if batteryPercent > BATT_PERC_MAX : #or car_voltage_mV < VBATT_PAUSE_CHARGING * 1e3:
                 # print("log purpose : HARDWARE.set_battery_charging(False)  False ")
                 HARDWARE.set_battery_charging(False)
-                os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
                 return True
+                os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
         else :
             # print("log purpose : HARDWARE.get_battery_charging()  False ")
             #if batteryPercent < BATT_PERC_MIN and car_voltage_mV  > VBATT_PAUSE_CHARGING * 1e3:
             if batteryPercent < BATT_PERC_MIN :#and car_voltage_mV > VBATT_PAUSE_CHARGING * 1e3:
                 #print("log purpose : HARDWARE.set_battery_charging(True)  True ")
                 HARDWARE.set_battery_charging(True)
-                os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
                 return False
-
+                os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
