@@ -40,7 +40,7 @@ class CarController():
     if CS.lka_steering_cmd_counter != self.lka_steering_cmd_counter_last:
       self.lka_steering_cmd_counter_last = CS.lka_steering_cmd_counter
     elif (frame % P.STEER_STEP) == 0:
-      lkas_enabled = c.active and not (CS.out.steerFaultTemporary or CS.out.steerFaultPermanent) and CS.lkMode and CS.out.vEgo > P.MIN_STEER_SPEED
+      lkas_enabled = (c.active or CS.pause_long_on_gas_press) and not (CS.out.steerFaultTemporary or CS.out.steerFaultPermanent) and CS.lkMode and CS.out.vEgo > P.MIN_STEER_SPEED
       if lkas_enabled:
         new_steer = int(round(actuators.steer * P.STEER_MAX))
         apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, P)
@@ -57,7 +57,7 @@ class CarController():
 
     # Gas/regen and brakes - all at 25Hz
     if (frame % 4) == 0:
-      if not c.active:
+      if not c.active or CS.pause_long_on_gas_press:
         # Stock ECU sends max regen when not enabled.
         self.apply_gas = P.MAX_ACC_REGEN
         self.apply_brake = 0
@@ -84,8 +84,13 @@ class CarController():
         car_stopping = self.apply_gas < P.ZERO_GAS
         standstill = CS.pcm_acc_status == AccState.STANDSTILL
 
-        at_full_stop = enabled and standstill and car_stopping
-        near_stop = enabled and (CS.out.vEgo < P.NEAR_STOP_BRAKE_PHASE) and car_stopping
+        if CS.pause_long_on_gas_press:
+          at_full_stop = False
+          near_stop = False
+        else:
+          at_full_stop = enabled and standstill and car_stopping
+          near_stop = enabled and (CS.out.vEgo < P.NEAR_STOP_BRAKE_PHASE) and car_stopping
+
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, CanBus.CHASSIS, self.apply_brake, idx, near_stop, at_full_stop))
         CS.autoHoldActivated = False
 

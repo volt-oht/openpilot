@@ -44,6 +44,7 @@ def manager_init() -> None:
     ("IsMetric", "1"),
     ("DisableOpFcw", "1"),
     ("DisableUpdates", "1"),
+    ("DisableDisengageOnGas", "0"),
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
