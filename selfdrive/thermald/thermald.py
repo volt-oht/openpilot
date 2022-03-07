@@ -360,17 +360,17 @@ def thermald_thread(end_event, hw_queue):
     if power_monitor.should_shutdown(peripheralState, onroad_conditions["ignition"], in_car, off_ts, started_seen):
       cloudlog.info(f"shutting device down, offroad since {off_ts}")
       # TODO: add function for blocking cloudlog instead of sleep
-      time.sleep(10)
+      time.sleep(300)
       HARDWARE.shutdown()
 
     # auto shutdown EON only logic applied
     if EON and off_ts is not None and not HARDWARE.get_usb_present():
-      shutdown_sec = 240
+      shutdown_sec = 360
       sec_now = sec_since_boot() - off_ts
       if (shutdown_sec - 5) < sec_now:
         msg.deviceState.chargingDisabled = True
       if shutdown_sec < sec_now:
-        time.sleep(5)
+        time.sleep(600)
         HARDWARE.shutdown()
 
     msg.deviceState.chargingError = current_filter.x > 0. and msg.deviceState.batteryPercent < 90  # if current is positive, then battery is being discharged
