@@ -1,5 +1,10 @@
 ![](https://i.imgur.com/b0ZyIx5.jpg)
 
+This is an open source. I'm also using this at my own risk. 
+So by installing this open source, it is your responsibility for any risk that may arise while using this open source.
+The responsibility applies to all my repositories and branches.
+Use it at your own risk.
+
 Table of Contents
 =======================
 

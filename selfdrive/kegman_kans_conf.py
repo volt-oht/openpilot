@@ -39,14 +39,14 @@ class kegman_kans_conf():
         self.config = json.load(f)
 
       if "battPercOff" not in self.config:
-        self.config.update({"battPercOff":"81"})
+        self.config.update({"battPercOff":"50"})
         self.config.update({"carVoltageMinEonShutdown":"12000"})
         self.element_updated = True
 
       if "tuneGernby" not in self.config:
         self.config.update({"tuneGernby":"1"})
         self.config.update({"Kp":"0.185"})
-        self.config.update({"Ki":"0.095"})
+        self.config.update({"Ki":"0.085"})
         self.element_updated = True
 
       if "liveParams" not in self.config:
