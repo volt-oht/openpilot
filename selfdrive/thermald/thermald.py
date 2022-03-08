@@ -73,7 +73,6 @@ def read_thermal(thermal_config):
   return dat
 
 
-
 def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_text: Optional[str]=None):
   if prev_offroad_states.get(offroad_alert, None) == (show_alert, extra_text):
     return
@@ -101,9 +100,8 @@ def hw_state_thread(end_event, hw_queue):
           network_strength=HARDWARE.get_network_strength(network_type),
           network_info=HARDWARE.get_network_info(),
           nvme_temps=HARDWARE.get_nvme_temperatures(),
-          wifi_address=HARDWARE.get_ip_address(),
           modem_temps=modem_temps,
-
+          wifi_address=HARDWARE.get_ip_address(),
         )
 
         try:
@@ -150,7 +148,7 @@ def thermald_thread(end_event, hw_queue):
   last_hw_state = HardwareState(
     network_type=NetworkType.none,
     network_strength=NetworkStrength.unknown,
-    network_info = None,
+    network_info=None,
     nvme_temps=[],
     modem_temps=[],
     wifi_address='N/A',
@@ -158,7 +156,6 @@ def thermald_thread(end_event, hw_queue):
 
   current_filter = FirstOrderFilter(0., CURRENT_TAU, DT_TRML)
   temp_filter = FirstOrderFilter(0., TEMP_TAU, DT_TRML)
-
   should_start_prev = False
   in_car = False
   is_uno = False
@@ -358,7 +355,7 @@ def thermald_thread(end_event, hw_queue):
 
     # Check if we need to shut down
     if power_monitor.should_shutdown(peripheralState, onroad_conditions["ignition"], in_car, off_ts, started_seen):
-      cloudlog.info(f"shutting device down, offroad since {off_ts}")
+      cloudlog.warning(f"shutting device down, offroad since {off_ts}")
       # TODO: add function for blocking cloudlog instead of sleep
       time.sleep(300)
       HARDWARE.shutdown()
