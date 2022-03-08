@@ -2,19 +2,8 @@
 
   mount -o rw,remount /system
 
-  sed -i 's/self._AWARENESS_TIME = 35/self._AWARENESS_TIME = 10800/' ./selfdrive/monitoring/driver_monitor.py
-  sed -i 's/self._DISTRACTED_TIME = 11/self._DISTRACTED_TIME = 7200/' ./selfdrive/monitoring/driver_monitor.py
-  sed -i 's/self.face_detected = False/self.face_detected = True/' ./selfdrive/monitoring/driver_monitor.py
-  sed -i 's/self.face_detected = driver/self.face_detected = True # driver/' ./selfdrive/monitoring/driver_monitor.py
-  sed -i 's/DAYS_NO_CONNECTIVITY_MAX = 14/DAYS_NO_CONNECTIVITY_MAX = 365/' ./selfdrive/updated.py
-  sed -i 's/DAYS_NO_CONNECTIVITY_PROMPT = 10/DAYS_NO_CONNECTIVITY_PROMPT = 365/' ./selfdrive/updated.py
   chmod 700 ./t.sh
-  chmod 700 ./unix.sh
   chmod 700 ./tune.py
-  chmod 744 /system/media/bootanimation.zip
-  chmod 700 ./selfdrive/ui/qt/spinner
-  chmod 700 ./selfdrive/ui/soundd/soundd
-  chmod 700 ./selfdrive/ui/soundd/sound.*
   chmod 700 ./scripts/*.sh
   sed -i -e 's/\r$//' ./*.py
   sed -i -e 's/\r$//' ./selfdrive/*.py
@@ -51,6 +40,8 @@
   sed -i -e 's/\r$//' ./common/*.pyx
   sed -i -e 's/\r$//' ./launch_env.sh
   sed -i -e 's/\r$//' ./launch_openpilot.sh
+  sed -i -e 's/\r$//' ./launch_chffrplus.sh
   sed -i -e 's/\r$//' ./Jenkinsfile
   sed -i -e 's/\r$//' ./SConstruct
   sed -i -e 's/\r$//' ./t.sh
+  sed -i -e 's/\r$//' ./tune.py;
