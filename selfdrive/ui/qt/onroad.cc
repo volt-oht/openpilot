@@ -309,7 +309,7 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   drawIcon(p, x, y, wifi_img, iconbgColor, wifi_status ? 1.0 : 0.2);
   p.setOpacity(1.0);
 
-  // N direction icon (upper right 3)
+  // N direction icon (bottom left 2)
   x = radius / 2 + (bdr_s * 2) + (radius + 50);
   y = rect().bottom() - footer_h / 2 - 10;
   // x = rect().right() - (radius / 2) - (bdr_s * 2) - (radius * 3);
