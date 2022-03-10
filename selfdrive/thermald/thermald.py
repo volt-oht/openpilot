@@ -21,7 +21,7 @@ from selfdrive.hardware import EON, HARDWARE, PC, TICI
 from selfdrive.loggerd.config import get_available_percent
 from selfdrive.statsd import statlog
 from selfdrive.kegman_kans_conf import kegman_kans_conf
-kegman_kans = kegman_kans_conf()
+
 from selfdrive.swaglog import cloudlog
 from selfdrive.thermald.power_monitoring import PowerMonitoring
 from selfdrive.thermald.fan_controller import EonFanController, UnoFanController, TiciFanController
@@ -36,7 +36,7 @@ DISCONNECT_TIMEOUT = 5.  # wait 5 seconds before going offroad after disconnect 
 PANDA_STATES_TIMEOUT = int(1000 * 2.5 * DT_TRML)  # 2.5x the expected pandaState frequency
 
 ThermalBand = namedtuple("ThermalBand", ['min_temp', 'max_temp'])
-HardwareState = namedtuple("HardwareState", ['network_type', 'network_metered', 'network_strength', 'network_info', 'nvme_temps', 'modem_temps'])
+HardwareState = namedtuple("HardwareState", ['network_type', 'network_metered', 'network_strength', 'network_info', 'nvme_temps', 'modem_temps', 'wifi_address'])
 
 # List of thermal bands. We will stay within this region as long as we are within the bounds.
 # When exiting the bounds, we'll jump to the lower or higher band. Bands are ordered in the dict.
@@ -72,6 +72,30 @@ def read_thermal(thermal_config):
   dat.deviceState.pmicTempC = [read_tz(z) / thermal_config.pmic[1] for z in thermal_config.pmic[0]]
   return dat
 
+
+# from bellow line, to control charging disabled
+def check_car_battery_voltage(should_start, pandaStates, charging_disabled, msg):
+  sm = messaging.SubMaster(["pandaStates"])
+  sm.update(0)
+  pandaStates = sm['pandaStates']
+  if sm.updated['pandaStates']:
+    print(pandaStates)
+
+  kegman_kans = kegman_kans_conf()
+  if charging_disabled and (pandaStates is None) and msg.deviceState.batteryPercent < int(kegman_kans.conf['battChargeMin']):
+    charging_disabled = False
+    os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
+  elif (charging_disabled or not charging_disabled) and (msg.deviceState.batteryPercent < int(kegman_kans.conf['battChargeMax']) or (pandaStates is None and not should_start)):
+    charging_disabled = False
+    os.system('echo "1" > /sys/class/power_supply/battery/charging_enabled')
+  elif not charging_disabled and (msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']) or (pandaStates is not None and not should_start)):
+    charging_disabled = True
+    os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
+  elif msg.deviceState.batteryCurrent < 0 and msg.deviceState.batteryPercent > int(kegman_kans.conf['battChargeMax']):
+    charging_disabled = True
+    os.system('echo "0" > /sys/class/power_supply/battery/charging_enabled')
+
+  return charging_disabled # to this line
 
 def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_text: Optional[str]=None):
   if prev_offroad_states.get(offroad_alert, None) == (show_alert, extra_text):
@@ -158,6 +182,7 @@ def thermald_thread(end_event, hw_queue):
 
   current_filter = FirstOrderFilter(0., CURRENT_TAU, DT_TRML)
   temp_filter = FirstOrderFilter(0., TEMP_TAU, DT_TRML)
+  charging_disabled = False
   should_start_prev = False
   in_car = False
   is_uno = False
@@ -295,7 +320,6 @@ def thermald_thread(end_event, hw_queue):
     # controls will warn with CPU above 95 or battery above 60
     onroad_conditions["device_temp_good"] = thermal_status < ThermalStatus.danger
     set_offroad_alert_if_changed("Offroad_TemperatureTooHigh", (not onroad_conditions["device_temp_good"]))
-    startup_conditions["hardware_supported"] = pandaStates is not None
 
     if TICI:
       missing = (not Path("/data/media").is_mount()) and (not os.path.isfile("/persist/comma/living-in-the-moment"))
@@ -338,6 +362,16 @@ def thermald_thread(end_event, hw_queue):
       started_ts = None
       if off_ts is None:
         off_ts = sec_since_boot()
+    # from bellow line, to control charging disabled
+    charging_disabled = check_car_battery_voltage(should_start, pandaStates, charging_disabled, msg)
+
+    if msg.deviceState.batteryCurrent > 0:
+      msg.deviceState.batteryStatus = "Discharging"
+    else:
+      msg.deviceState.batteryStatus = "Charging"
+
+
+    msg.deviceState.chargingDisabled = charging_disabled #to this line
 
     # Offroad power monitoring
     power_monitor.calculate(peripheralState, onroad_conditions["ignition"])
@@ -349,29 +383,10 @@ def thermald_thread(end_event, hw_queue):
     # Check if we need to disable charging (handled by boardd)
     msg.deviceState.chargingDisabled = power_monitor.should_disable_charging(onroad_conditions["ignition"], in_car, off_ts)
 
-    # Set EON charging disable
-    # based on kegman, EON only logic applied
-    if EON:
-      from selfdrive.thermald.eon_battery_manager import setEONChargingStatus
-      setEONChargingStatus(power_monitor.car_voltage_mV, msg.deviceState.batteryPercent)
-
-
     # Check if we need to shut down
     if power_monitor.should_shutdown(peripheralState, onroad_conditions["ignition"], in_car, off_ts, started_seen):
       cloudlog.warning(f"shutting device down, offroad since {off_ts}")
-      # TODO: add function for blocking cloudlog instead of sleep
-      time.sleep(300)
-      HARDWARE.shutdown()
-
-    # auto shutdown EON only logic applied
-    if EON and off_ts is not None and not HARDWARE.get_usb_present():
-      shutdown_sec = 360
-      sec_now = sec_since_boot() - off_ts
-      if (shutdown_sec - 5) < sec_now:
-        msg.deviceState.chargingDisabled = True
-      if shutdown_sec < sec_now:
-        time.sleep(600)
-        HARDWARE.shutdown()
+      params.put_bool("DoShutdown", True)
 
     msg.deviceState.chargingError = current_filter.x > 0. and msg.deviceState.batteryPercent < 90  # if current is positive, then battery is being discharged
     msg.deviceState.started = started_ts is not None
@@ -384,7 +399,9 @@ def thermald_thread(end_event, hw_queue):
     msg.deviceState.thermalStatus = thermal_status
     pm.send("deviceState", msg)
 
+    # for charging disabled
     if EON and not is_uno:
+      print(msg)
       set_offroad_alert_if_changed("Offroad_ChargeDisabled", (not usb_power))
 
     should_start_prev = should_start

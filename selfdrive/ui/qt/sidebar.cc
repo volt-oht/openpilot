@@ -122,7 +122,6 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   QBrush bgBrush("#149948");
   p.fillRect(bq, bgBrush);
   p.drawPixmap(rect, battery_imgs[m_battery_img]);
-  p.restore();
 
   p.setPen(Qt::white);
   configFont(p, "Open Sans", 30, "Regular");

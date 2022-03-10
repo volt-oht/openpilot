@@ -11,7 +11,6 @@ from selfdrive.hardware import HARDWARE
 from selfdrive.swaglog import cloudlog
 from selfdrive.statsd import statlog
 from selfdrive.kegman_kans_conf import kegman_kans_conf
-kegman_kans = kegman_kans_conf()
 
 PANDA_OUTPUT_VOLTAGE = 5.28
 CAR_VOLTAGE_LOW_PASS_K = 0.091 # LPF gain for 5s tau (dt/tau / (dt/tau + 1))
@@ -193,6 +192,8 @@ class PowerMonitoring:
 
     now = sec_since_boot()
     panda_charging = (peripheralState.usbPowerMode != log.PeripheralState.UsbPowerMode.client)
+
+    kegman_kans = kegman_kans_conf()
     BATT_PERC_OFF = int(kegman_kans.conf['battPercOff'])
 
     should_shutdown = False
