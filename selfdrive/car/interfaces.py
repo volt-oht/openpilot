@@ -131,8 +131,6 @@ class CarInterfaceBase(ABC):
       events.add(EventName.wrongCarMode)
     if cs_out.espDisabled:
       events.add(EventName.espDisabled)
-    if cs_out.gasPressed and self.disengage_on_gas:
-      events.add(EventName.gasPressed)
     if cs_out.stockFcw:
       events.add(EventName.stockFcw)
     if cs_out.stockAeb:
@@ -141,8 +139,8 @@ class CarInterfaceBase(ABC):
       events.add(EventName.speedTooHigh)
     if cs_out.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    # if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
-    #   events.add(EventName.brakeHold)
+    if cs_out.gasPressed and self.disengage_on_gas:
+      events.add(EventName.gasPressed)
 
 
     # Handle permanent and temporary steering faults
