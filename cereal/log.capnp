@@ -842,6 +842,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   modelMonoTime @9 :UInt64;
   hasLead @7 :Bool;
   fcw @8 :Bool;
+  vTargetFuture @14 :Float32;
   longitudinalPlanSource @15 :LongitudinalPlanSource;
   processingDelay @29 :Float32;
 
@@ -864,7 +865,6 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   vCruiseDEPRECATED @16 :Float32;
   aCruiseDEPRECATED @17 :Float32;
   vTargetDEPRECATED @3 :Float32;
-  vTargetFutureDEPRECATED @14 :Float32;
   aTargetDEPRECATED @18 :Float32;
   vStartDEPRECATED @26 :Float32;
   aStartDEPRECATED @27 :Float32;

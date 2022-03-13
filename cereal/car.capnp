@@ -115,6 +115,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     highCpuUsage @105;
     cruiseMismatch @110;
     lkasDisabled @111;
+    accBrakeHold @112;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -356,6 +357,7 @@ struct CarControl {
     override @1: Bool;
     speedOverride @2: Float32;
     accelOverride @3: Float32;
+    targetSpeed @4 :Float32; # The target speed for the vehicle
   }
 
   struct HUDControl {
