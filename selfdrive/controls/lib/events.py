@@ -385,6 +385,14 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
       Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.),
   },
 
+  EventName.accBrakeHold: {
+    ET.WARNING: Alert(
+      "WAITING TO RESUME ACC",
+      "Release brake to resume ACC",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .2),
+  },
+
   EventName.preDriverDistracted: {
     ET.WARNING: Alert(
       "Pay Attention",
