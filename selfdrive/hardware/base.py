@@ -1,16 +1,11 @@
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 from collections import namedtuple
-from typing import Dict
 
-from cereal import log
+ThermalConfig = namedtuple('ThermalConfig', ['cpu', 'gpu', 'mem', 'bat', 'ambient'])
 
-ThermalConfig = namedtuple('ThermalConfig', ['cpu', 'gpu', 'mem', 'bat', 'ambient', 'pmic'])
-NetworkType = log.DeviceState.NetworkType
-
-
-class HardwareBase(ABC):
+class HardwareBase:
   @staticmethod
-  def get_cmdline() -> Dict[str, str]:
+  def get_cmdline():
     with open('/proc/cmdline') as f:
       cmdline = f.read()
     return {kv[0]: kv[1] for kv in [s.split('=') for s in cmdline.split(' ')] if len(kv) == 2}
@@ -71,13 +66,6 @@ class HardwareBase(ABC):
   def get_network_strength(self, network_type):
     pass
 
-  def get_network_metered(self, network_type) -> bool:
-    return network_type not in (NetworkType.none, NetworkType.wifi, NetworkType.ethernet)
-
-  @staticmethod
-  def set_bandwidth_limit(upload_speed_kbps: int, download_speed_kbps: int) -> None:
-    pass
-
   @abstractmethod
   def get_battery_capacity(self):
     pass
@@ -123,10 +111,6 @@ class HardwareBase(ABC):
     pass
 
   @abstractmethod
-  def get_screen_brightness(self):
-    pass
-
-  @abstractmethod
   def set_power_save(self, powersave_enabled):
     pass
 
@@ -136,14 +120,6 @@ class HardwareBase(ABC):
 
   @abstractmethod
   def get_modem_version(self):
-    pass
-
-  @abstractmethod
-  def get_modem_temperatures(self):
-    pass
-
-  @abstractmethod
-  def get_nvme_temperatures(self):
     pass
 
   @abstractmethod
