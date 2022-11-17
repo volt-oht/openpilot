@@ -1,7 +1,7 @@
 import os
 
-from selfdrive.hardware import EON, TICI, PC
 from selfdrive.manager.process import PythonProcess, NativeProcess, DaemonProcess
+from selfdrive.hardware import EON, TICI, PC
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 
@@ -14,12 +14,11 @@ procs = [
   #NativeProcess("logcatd", "selfdrive/logcatd", ["./logcatd"]),
   #NativeProcess("loggerd", "selfdrive/loggerd", ["./loggerd"]),
   NativeProcess("modeld", "selfdrive/modeld", ["./modeld"]),
-  NativeProcess("navd", "selfdrive/ui/navd", ["./navd"], enabled=(PC or TICI), persistent=True),
   NativeProcess("proclogd", "selfdrive/proclogd", ["./proclogd"]),
   NativeProcess("sensord", "selfdrive/sensord", ["./sensord"], enabled=not PC, persistent=EON, sigkill=EON),
   NativeProcess("ubloxd", "selfdrive/locationd", ["./ubloxd"], enabled=(not PC or WEBCAM)),
   NativeProcess("ui", "selfdrive/ui", ["./ui"], persistent=True, watchdog_max_dt=(5 if TICI else None)),
-  NativeProcess("soundd", "selfdrive/ui/soundd", ["./soundd"], persistent=True),
+  NativeProcess("soundd", "selfdrive/ui", ["./soundd"]),
   NativeProcess("locationd", "selfdrive/locationd", ["./locationd"]),
   NativeProcess("boardd", "selfdrive/boardd", ["./boardd"], enabled=False),
   PythonProcess("calibrationd", "selfdrive.locationd.calibrationd"),
@@ -36,11 +35,10 @@ procs = [
   #PythonProcess("tombstoned", "selfdrive.tombstoned", enabled=not PC, persistent=True),
   #PythonProcess("updated", "selfdrive.updated", enabled=not PC, persistent=True),
   #PythonProcess("uploader", "selfdrive.loggerd.uploader", persistent=True),
-  PythonProcess("statsd", "selfdrive.statsd", persistent=True),
+  PythonProcess("mapd", "selfdrive.mapd.mapd"),
 
   # EON only
   PythonProcess("rtshield", "selfdrive.rtshield", enabled=EON),
-  PythonProcess("shutdownd", "selfdrive.hardware.eon.shutdownd", enabled=EON),
   PythonProcess("androidd", "selfdrive.hardware.eon.androidd", enabled=EON, persistent=True),
 ]
 
