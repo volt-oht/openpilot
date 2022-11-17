@@ -1,7 +1,7 @@
 import os
 import time
-from abc import abstractmethod, ABC
-from typing import Dict, Tuple, List
+import shutil
+from typing import Dict
 
 from cereal import car
 from common.kalman.simple_kalman import KF1D
@@ -16,31 +16,32 @@ from selfdrive.controls.lib.vehicle_model import VehicleModel
 GearShifter = car.CarState.GearShifter
 EventName = car.CarEvent.EventName
 
-MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS
+# WARNING: this value was determined based on the model's training distribution,
+#          model predictions above this speed can be unpredictable
+MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS  # 135 + 4 = 86 mph
 ACCEL_MAX = 2.0
 ACCEL_MIN = -3.5
 
 
 # generic car and radar interfaces
 
-
-class CarInterfaceBase(ABC):
+class CarInterfaceBase():
   def __init__(self, CP, CarController, CarState):
     self.CP = CP
     self.VM = VehicleModel(CP)
-    self.disengage_on_gas = not Params().get_bool("DisableDisengageOnGas")
 
     self.frame = 0
+    self.steer_warning = 0
     self.steering_unpressed = 0
     self.low_speed_alert = False
-    self.silent_steer_warning = True
+
+    self.disengage_on_gas = not Params().get_bool("DisableDisengageOnGas")
 
     if CarState is not None:
       self.CS = CarState(CP)
       self.cp = self.CS.get_can_parser(CP)
       self.cp_cam = self.CS.get_cam_can_parser(CP)
       self.cp_body = self.CS.get_body_can_parser(CP)
-      self.cp_chassis = self.CS.get_chassis_can_parser(CP) #this line for brakeLights
       self.cp_loopback = self.CS.get_loopback_can_parser(CP)
 
     self.CC = None
@@ -48,13 +49,16 @@ class CarInterfaceBase(ABC):
       self.CC = CarController(self.cp.dbc_name, CP, self.VM)
 
   @staticmethod
-  def get_pid_accel_limits(CP, current_speed, cruise_speed):
+  def get_pid_accel_limits(CP, current_speed, cruise_speed, CI = None):
     return ACCEL_MIN, ACCEL_MAX
 
   @staticmethod
-  @abstractmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), has_relay=False, car_fw=None):
-    pass
+  def calc_accel_override(a_ego, a_target, v_ego, v_target):
+    return 1.
+
+  @staticmethod
+  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None):
+    raise NotImplementedError
 
   @staticmethod
   def init(CP, logcan, sendcan):
@@ -65,25 +69,30 @@ class CarInterfaceBase(ABC):
     # Proportional to realigning tire momentum: lateral acceleration.
     # TODO: something with lateralPlan.curvatureRates
     return desired_angle * (v_ego**2)
+  
+  @staticmethod
+  def get_steer_feedforward_torque_default(desired_lateral_accel, v_ego):
+    return desired_lateral_accel
 
-  @classmethod
-  def get_steer_feedforward_function(cls):
-    return cls.get_steer_feedforward_default
+  @staticmethod
+  def get_steer_feedforward_function():
+    return CarInterfaceBase.get_steer_feedforward_default
+  
+  @staticmethod
+  def get_steer_feedforward_function_torque():
+    return CarInterfaceBase.get_steer_feedforward_torque_default
 
   # returns a set of default params to avoid repetition in car specific params
   @staticmethod
-  def get_std_params(candidate, fingerprint, has_relay):
+  def get_std_params(candidate, fingerprint):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
-    ret.unsafeMode = 1  # see safety_declarations.h for allowed values
-    ret.isPandaBlack = has_relay
 
     # standard ALC params
     ret.steerControlType = car.CarParams.SteerControlType.torque
     ret.steerMaxBP = [0.]
     ret.steerMaxV = [1.]
     ret.minSteerSpeed = 0.
-    ret.wheelSpeedFactor = 1.0
 
     ret.pcmCruise = True     # openpilot's state is tied to the PCM's cruise state on most cars
     ret.minEnableSpeed = -1. # enable is done by stock ACC, so ignore this
@@ -106,15 +115,15 @@ class CarInterfaceBase(ABC):
     ret.steerLimitTimer = 1.0
     return ret
 
-  @abstractmethod
-  def update(self, c: car.CarControl, can_strings: List[bytes]) -> car.CarState:
-    pass
+  # returns a car.CarState, pass in car.CarControl
+  def update(self, c, can_strings):
+    raise NotImplementedError
 
-  @abstractmethod
-  def apply(self, c: car.CarControl) -> Tuple[car.CarControl.Actuators, List[bytes]]:
-    pass
+  # return sendcan, pass in a car.CarControl
+  def apply(self, c):
+    raise NotImplementedError
 
-  def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True):
+  def create_common_events(self, cs_out, extra_gears=None, gas_resume_speed=-1, pcm_enable=True):
     events = Events()
 
     if cs_out.doorOpen:
@@ -130,6 +139,8 @@ class CarInterfaceBase(ABC):
       events.add(EventName.wrongCarMode)
     if cs_out.espDisabled:
       events.add(EventName.espDisabled)
+    if cs_out.gasPressed:
+      events.add(EventName.gasPressed)
     if cs_out.stockFcw:
       events.add(EventName.stockFcw)
     if cs_out.stockAeb:
@@ -138,26 +149,25 @@ class CarInterfaceBase(ABC):
       events.add(EventName.speedTooHigh)
     if cs_out.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    if cs_out.gasPressed and self.disengage_on_gas:
-      events.add(EventName.gasPressed)
 
+    self.steer_warning = self.steer_warning + 1 if cs_out.steerWarning else 0
+    self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
 
     # Handle permanent and temporary steering faults
-    self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
-    if cs_out.steerFaultTemporary:
-      # if the user overrode recently, show a less harsh alert
-      if self.silent_steer_warning or cs_out.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
-        self.silent_steer_warning = True
-        events.add(EventName.steerTempUnavailableSilent)
-      else:
-        events.add(EventName.steerTempUnavailable)
-    else:
-      self.silent_steer_warning = False
-    if cs_out.steerFaultPermanent:
+    if cs_out.steerError:
       events.add(EventName.steerUnavailable)
+    elif cs_out.steerWarning:
+      # only escalate to the harsher alert after the condition has
+      # persisted for 0.5s and we're certain that the user isn't overriding
+      if self.steering_unpressed > int(0.5/DT_CTRL) and self.steer_warning > int(0.5/DT_CTRL):
+        events.add(EventName.steerTempUnavailable)
+      else:
+        events.add(EventName.steerTempUnavailableSilent)
 
     # Disable on rising edge of gas or brake. Also disable on brake when speed > 0.
-    if (self.disengage_on_gas and cs_out.gasPressed and (not self.CS.out.gasPressed)) or \
+    # Optionally allow to press gas at zero speed to resume.
+    # e.g. Chrysler does not spam the resume button yet, so resuming with gas is handy. FIXME!
+    if (self.disengage_on_gas and cs_out.gasPressed and (not self.CS.out.gasPressed) and cs_out.vEgo > gas_resume_speed) or \
        (cs_out.brakePressed and (not self.CS.out.brakePressed or not cs_out.standstill)):
       events.add(EventName.pedalPressed)
 
@@ -171,7 +181,7 @@ class CarInterfaceBase(ABC):
     return events
 
 
-class RadarInterfaceBase(ABC):
+class RadarInterfaceBase():
   def __init__(self, CP):
     self.pts = {}
     self.delay = 0
@@ -185,7 +195,7 @@ class RadarInterfaceBase(ABC):
     return ret
 
 
-class CarStateBase(ABC):
+class CarStateBase:
   def __init__(self, CP):
     self.CP = CP
     self.car_fingerprint = CP.carFingerprint
@@ -196,8 +206,9 @@ class CarStateBase(ABC):
     self.right_blinker_cnt = 0
     self.left_blinker_prev = False
     self.right_blinker_prev = False
-
-    self.pause_long_on_gas_press = False
+    
+    self.speed_limit_active = False
+    self.speed_limit = 0.
 
     # Q = np.matrix([[10.0, 0.0], [0.0, 100.0]])
     # R = 1e3
@@ -212,16 +223,6 @@ class CarStateBase(ABC):
 
     v_ego_x = self.v_ego_kf.update(v_ego_raw)
     return float(v_ego_x[0]), float(v_ego_x[1])
-
-  def get_wheel_speeds(self, fl, fr, rl, rr, unit=CV.KPH_TO_MS):
-    factor = unit * self.CP.wheelSpeedFactor
-
-    wheelSpeeds = car.CarState.WheelSpeeds.new_message()
-    wheelSpeeds.fl = fl * factor
-    wheelSpeeds.fr = fr * factor
-    wheelSpeeds.rl = rl * factor
-    wheelSpeeds.rr = rr * factor
-    return wheelSpeeds
 
   def update_blinker_from_lamp(self, blinker_time: int, left_blinker_lamp: bool, right_blinker_lamp: bool):
     """Update blinkers from lights. Enable output when light was seen within the last `blinker_time`
@@ -269,11 +270,6 @@ class CarStateBase(ABC):
 
   @staticmethod
   def get_body_can_parser(CP):
-    return None
-
-#bellows are for brakeLights
-  @staticmethod
-  def get_chassis_can_parser(CP):
     return None
 
   @staticmethod
