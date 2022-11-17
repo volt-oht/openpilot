@@ -6,10 +6,9 @@ import subprocess
 import sys
 import traceback
 from multiprocessing import Process
-from typing import List, Tuple, Union
 
 import cereal.messaging as messaging
-import selfdrive.sentry as sentry
+import selfdrive.crash as crash
 from common.basedir import BASEDIR
 from common.params import Params, ParamKeyType
 from common.text_window import TextWindow
@@ -20,31 +19,96 @@ from selfdrive.manager.process import ensure_running, launcher
 from selfdrive.manager.process_config import managed_processes
 from selfdrive.athena.registration import register, UNREGISTERED_DONGLE_ID
 from selfdrive.swaglog import cloudlog, add_file_handler
-from selfdrive.version import is_dirty, get_commit, get_version, get_origin, get_short_branch, \
-                              terms_version, training_version
+from selfdrive.version import dirty, get_git_commit, version, origin, branch, commit, \
+                              terms_version, training_version, comma_remote, \
+                              get_git_branch, get_git_remote
 from selfdrive.hardware.eon.apk import system
 
 sys.path.append(os.path.join(BASEDIR, "pyextra"))
 
+def manager_init():
 
-def manager_init() -> None:
   # update system time from panda
   set_time(cloudlog)
-
-  # save boot log
-  #subprocess.call("./bootlog", cwd=os.path.join(BASEDIR, "selfdrive/loggerd"))
 
   params = Params()
   params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
 
-  default_params: List[Tuple[str, Union[str, bytes]]] = [
+  default_params = [
     ("CompletedTrainingVersion", "0"),
     ("HasAcceptedTerms", "0"),
+    ("HandsOnWheelMonitoring", "0"),
     ("OpenpilotEnabledToggle", "1"),
     ("IsMetric", "1"),
-    ("DisableOpFcw", "1"),
-    ("DisableUpdates", "1"),
-    ("DisableDisengageOnGas", "0"),
+    ("CommunityFeaturesToggle", "1"),
+    ("ShowDebugUI", "1"),
+    ("IgnoreMissingNVME", "0"),
+    ("SpeedLimitControl", "0"),
+    ("EUSpeedLimitStyle", "0"),
+    ("SpeedLimitPercOffset", "0"),
+    ("TurnSpeedControl", "0"),
+    ("TurnVisionControl", "1"),
+    ("GMAutoHold", "1"),
+    ("CruiseSpeedOffset", "0"),
+    ("ColorPath", "0"),
+    ("AlternateColors", "0"),
+    ("ReverseSpeedAdjust", "1"),
+    ("CustomSounds", "0"),
+    ("SilentEngageDisengage", "0"),
+    ("ScreenDimMode", "2"),
+    ("AccelModeButton", "0"),
+    ("AccelMode", "0"),
+    ("EVDriveTrainEfficiency", "1"),
+    ("EVConsumptionReset", "0"),
+    ("EVConsumption5Mi", "0"),
+    ("EVConsumptionTripkWh", "0"),
+    ("EVConsumptionTripDistance", "0"),
+    ("EndToEndToggle", "1"),
+    ("EnableTorqueControl", "0"),
+    ("LanelessMode", "2"),
+    ("LanePositionEnabled", "1"),
+    ("AutoAutoLanePosition", "1"),
+    ("LongRangeLeadsEnabled", "0"),
+    ("AutoLanePositionActive", "1"),
+    ("LanePosition", "1"),
+    ("NudgelessLaneChange", "0"),
+    ("Coasting", "0"),
+    ("CoastingDL", "0"),
+    ("RegenBraking", "0"),
+    ("OnePedalMode", "0"),
+    ("OnePedalModeSimple", "0"),
+    ("OnePedalDLCoasting", "0"),
+    ("OnePedalModeEngageOnGas", "0"),
+    ("OnePedalDLEngageOnGas", "0"),
+    ("OnePedalBrakeMode", "0"),
+    ("OnePedalPauseBlinkerSteering", "0"),
+    ("FollowLevel", "2"),
+    ("DynamicFollow", "1"),
+    ("DynamicFollowToggle", "0"),
+    ("CoastingBrakeOverSpeed", "0"),
+    ("FrictionBrakePercent", "0"),
+    ("BrakeIndicator", "1"),
+    ("PowerMeterMode", "0"),
+    ("PowerMeterMetric", "1"),
+    ("PrintLeadInfo", "1"),
+    ("PrintAdjacentLeadSpeeds", "1"),
+    ("PrintAdjacentLeadSpeedsAtLead", "1"),
+    ("ExtendedRadar", "0"),
+    ("AdjacentPaths", "1"),
+    ("DisableOnroadUploads", "0"),
+    ("LowOverheadMode", "0"),
+    ("FPVolt", "0"),
+    ("MeasureConfigNum", "0"),
+    ("MeasureSlot00", "61"), # CPU점유율과 온도 °C
+    ("MeasureSlot01", "1"), # 핸들:경로 비교각
+    ("MeasureSlot02", "5"), # 엔진RPM + 온도
+    ("MeasureSlot03", "7"), # 냉각수온도
+    ("MeasureSlot04", "74"), # GPS정확도,위성수
+    ("MeasureSlot05", "37"), # 차선폭
+    ("MeasureSlot06", "10"), # 횡가속도
+    ("MeasureSlot07", "31"), # 고도
+    ("MeasureSlot08", "32"), # 위도
+    ("MeasureSlot09", "43"), # 차간거리, 안전거리
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -52,17 +116,18 @@ def manager_init() -> None:
   if params.get_bool("RecordFrontLock"):
     params.put_bool("RecordFront", True)
 
-  if not params.get_bool("DisableRadar_Allow"):
-    params.delete("DisableRadar")
-
   # set unset params
   for k, v in default_params:
     if params.get(k) is None:
       params.put(k, v)
 
+  # parameters set by Enviroment Varables
+  if os.getenv("HANDSMONITORING") is not None:
+    params.put_bool("HandsOnWheelMonitoring", bool(int(os.getenv("HANDSMONITORING"))))
+
   # is this dashcam?
   if os.getenv("PASSIVE") is not None:
-    params.put_bool("Passive", bool(int(os.getenv("PASSIVE", "0"))))
+    params.put_bool("Passive", bool(int(os.getenv("PASSIVE"))))
 
   if params.get("Passive") is None:
     raise Exception("Passive must be set to continue")
@@ -76,12 +141,12 @@ def manager_init() -> None:
     print("WARNING: failed to make /dev/shm")
 
   # set version params
-  params.put("Version", get_version())
+  params.put("Version", version)
   params.put("TermsVersion", terms_version)
   params.put("TrainingVersion", training_version)
-  params.put("GitCommit", get_commit(default=""))
-  params.put("GitBranch", get_short_branch(default=""))
-  params.put("GitRemote", get_origin(default=""))
+  params.put("GitCommit", get_git_commit(default=""))
+  params.put("GitBranch", get_git_branch(default=""))
+  params.put("GitRemote", get_git_remote(default=""))
 
   # set dongle id
   reg_res = register(show_spinner=True)
@@ -92,50 +157,54 @@ def manager_init() -> None:
     raise Exception(f"Registration failed for device {serial}")
   os.environ['DONGLE_ID'] = dongle_id  # Needed for swaglog
 
-  if not is_dirty():
+  if not dirty:
     os.environ['CLEAN'] = '1'
 
-  # init logging
-  sentry.init(sentry.SentryProject.SELFDRIVE)
-  cloudlog.bind_global(dongle_id=dongle_id, version=get_version(), dirty=is_dirty(),
+  cloudlog.bind_global(dongle_id=dongle_id, version=version, dirty=dirty,
                        device=HARDWARE.get_device_type())
 
+  if comma_remote and not (os.getenv("NOLOG") or os.getenv("NOCRASH") or PC):
+    crash.init()
+  crash.bind_user(id=dongle_id)
+  crash.bind_extra(dirty=dirty, origin=origin, branch=branch, commit=commit,
+                   device=HARDWARE.get_device_type())
 
-def manager_prepare() -> None:
+
+def manager_prepare():
   for p in managed_processes.values():
     p.prepare()
 
 
-def manager_cleanup() -> None:
-  # send signals to kill all procs
+def manager_cleanup():
   for p in managed_processes.values():
-    p.stop(block=False)
-
-  # ensure all are killed
-  for p in managed_processes.values():
-    p.stop(block=True)
+    p.stop()
 
   cloudlog.info("everything is dead")
 
 
-def manager_thread() -> None:
+def manager_thread():
+
+  Process(name="road_speed_limiter", target=launcher, args=("selfdrive.road_speed_limiter",)).start()
 
   if EON:
     system("am startservice com.neokii.optool/.MainService")
-
-  Process(name="road_speed_limiter", target=launcher, args=("selfdrive.road_speed_limiter", "road_speed_limiter")).start()
+    Process(name="autoshutdownd", target=launcher, args=("selfdrive.autoshutdownd", "autoshutdownd")).start()
   cloudlog.bind(daemon="manager")
   cloudlog.info("manager start")
   cloudlog.info({"environ": os.environ})
 
+  # save boot log
+  subprocess.call("./bootlog", cwd=os.path.join(BASEDIR, "selfdrive/loggerd"))
+
   params = Params()
 
-  ignore: List[str] = []
-  if params.get("DongleId", encoding='utf8') in (None, UNREGISTERED_DONGLE_ID):
+  ignore = []
+  if params.get("DongleId", encoding='utf8') == UNREGISTERED_DONGLE_ID:
     ignore += ["manage_athenad", "uploader"]
   if os.getenv("NOBOARD") is not None:
     ignore.append("pandad")
-  ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
+  if os.getenv("BLOCK") is not None:
+    ignore += os.getenv("BLOCK").split(",")
 
   ensure_running(managed_processes.values(), started=False, not_run=ignore)
 
@@ -146,6 +215,12 @@ def manager_thread() -> None:
   while True:
     sm.update()
     not_run = ignore[:]
+
+    if sm['deviceState'].freeSpacePercent < 5:
+      not_run.append("loggerd")
+    elif params.get_bool("LowOverheadMode"):
+      low_overhead_ignore = ["loggerd","proclogd"]
+      not_run += low_overhead_ignore
 
     started = sm['deviceState'].started
     driverview = params.get_bool("IsDriverViewEnabled")
@@ -158,29 +233,22 @@ def manager_thread() -> None:
 
     started_prev = started
 
-    running = ' '.join("%s%s\u001b[0m" % ("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
-                       for p in managed_processes.values() if p.proc)
-    print(running)
-    cloudlog.debug(running)
+    running_list = ["%s%s\u001b[0m" % ("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
+                    for p in managed_processes.values() if p.proc]
+    cloudlog.debug(' '.join(running_list))
 
     # send managerState
     msg = messaging.new_message('managerState')
     msg.managerState.processes = [p.get_process_state_msg() for p in managed_processes.values()]
     pm.send('managerState', msg)
 
-    # Exit main loop when uninstall/shutdown/reboot is needed
-    shutdown = False
-    for param in ("DoUninstall", "DoShutdown", "DoReboot"):
-      if params.get_bool(param):
-        shutdown = True
-        params.put("LastManagerExitReason", param)
-        cloudlog.warning(f"Shutting down manager - {param} set")
-
-    if shutdown:
+    # TODO: let UI handle this
+    # Exit main loop when uninstall is needed
+    if params.get_bool("DoUninstall"):
       break
 
 
-def main() -> None:
+def main():
   prepare_only = os.getenv("PREPAREONLY") is not None
 
   manager_init()
@@ -201,20 +269,13 @@ def main() -> None:
     manager_thread()
   except Exception:
     traceback.print_exc()
-    sentry.capture_exception()
+    crash.capture_exception()
   finally:
     manager_cleanup()
 
-  params = Params()
-  if params.get_bool("DoUninstall"):
+  if Params().get_bool("DoUninstall"):
     cloudlog.warning("uninstalling")
     HARDWARE.uninstall()
-  elif params.get_bool("DoReboot"):
-    cloudlog.warning("reboot")
-    HARDWARE.reboot()
-  elif params.get_bool("DoShutdown"):
-    cloudlog.warning("shutdown")
-    HARDWARE.shutdown()
 
 
 if __name__ == "__main__":
@@ -225,11 +286,6 @@ if __name__ == "__main__":
   except Exception:
     add_file_handler(cloudlog)
     cloudlog.exception("Manager failed to start")
-
-    try:
-      managed_processes['ui'].stop()
-    except Exception:
-      pass
 
     # Show last 3 lines of traceback
     error = traceback.format_exc(-3)
