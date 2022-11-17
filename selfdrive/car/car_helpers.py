@@ -1,19 +1,20 @@
 import os
 from common.params import Params
 from common.basedir import BASEDIR
+
 from selfdrive.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from selfdrive.car.vin import get_vin, VIN_UNKNOWN
 from selfdrive.car.fw_versions import get_fw_versions, match_fw_to_car
 from selfdrive.swaglog import cloudlog
 import cereal.messaging as messaging
 from selfdrive.car import gen_empty_fingerprint
+from selfdrive.car.gm.values import CAR
 
 from cereal import car
 EventName = car.CarEvent.EventName
 
 
-def get_startup_event(car_recognized, controller_available, fw_seen):
-
+def get_startup_event(car_recognized, controller_available, fuzzy_fingerprint, fw_seen):
   event = EventName.startup
 
   if not car_recognized:
@@ -23,6 +24,8 @@ def get_startup_event(car_recognized, controller_available, fw_seen):
       event = EventName.startupNoFw
   elif car_recognized and not controller_available:
     event = EventName.startupNoControl
+  elif car_recognized and fuzzy_fingerprint:
+    event = EventName.startupFuzzyFingerprint
   return event
 
 
@@ -36,7 +39,7 @@ def get_one_can(logcan):
 def load_interfaces(brand_names):
   ret = {}
   for brand_name in brand_names:
-    path = f'selfdrive.car.{brand_name}'
+    path = ('selfdrive.car.%s' % brand_name)
     CarInterface = __import__(path + '.interface', fromlist=['CarInterface']).CarInterface
 
     if os.path.exists(BASEDIR + '/' + path.replace('.', '/') + '/carstate.py'):
@@ -62,10 +65,10 @@ def _get_interface_names():
   for car_folder in [x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]:
     try:
       brand_name = car_folder.split('/')[-1]
-      model_names = __import__(f'selfdrive.car.{brand_name}.values', fromlist=['CAR']).CAR
+      model_names = __import__('selfdrive.car.%s.values' % brand_name, fromlist=['CAR']).CAR
       model_names = [getattr(model_names, c) for c in model_names.__dict__.keys() if not c.startswith("__")]
       brand_names[brand_name] = model_names
-    except (ImportError, OSError):
+    except (ImportError, IOError):
       pass
 
   return brand_names
@@ -76,12 +79,16 @@ interface_names = _get_interface_names()
 interfaces = load_interfaces(interface_names)
 
 
+def only_toyota_left(candidate_cars):
+  return all(("TOYOTA" in c or "LEXUS" in c) for c in candidate_cars) and len(candidate_cars) > 0
+
+
 # **** for use live only ****
-def fingerprint(logcan, sendcan, has_relay):
+def fingerprint(logcan, sendcan):
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
 
-  if has_relay and not fixed_fingerprint and not skip_fw_query:
+  if not fixed_fingerprint and not skip_fw_query:
     # Vin query only reliably works thorugh OBDII
     bus = 1
 
@@ -119,24 +126,27 @@ def fingerprint(logcan, sendcan, has_relay):
     a = get_one_can(logcan)
 
     for can in a.can:
-      # The fingerprint dict is generated for all buses, this way the car interface
-      # can use it to detect a (valid) multipanda setup and initialize accordingly
-      if can.src < 128:
-        if can.src not in finger:
-          finger[can.src] = {}
+      # need to independently try to fingerprint both bus 0 and 1 to work
+      # for the combo black_panda and honda_bosch. Ignore extended messages
+      # and VIN query response.
+      # Include bus 2 for toyotas to disambiguate cars using camera messages
+      # (ideally should be done for all cars but we can't for Honda Bosch)
+      if can.src in range(0, 4):
         finger[can.src][can.address] = len(can.dat)
-
       for b in candidate_cars:
-        # Ignore extended messages and VIN query response.
-        if can.src == b and can.address < 0x800 and can.address not in (0x7df, 0x7e0, 0x7e8):
+        if (can.src == b or (only_toyota_left(candidate_cars[b]) and can.src == 2)) and \
+           can.address < 0x800 and can.address not in [0x7df, 0x7e0, 0x7e8]:
           candidate_cars[b] = eliminate_incompatible_cars(can, candidate_cars[b])
 
     # if we only have one car choice and the time since we got our first
     # message has elapsed, exit
     for b in candidate_cars:
+      # Toyota needs higher time to fingerprint, since DSU does not broadcast immediately
+      if only_toyota_left(candidate_cars[b]):
+        frame_fingerprint = 100  # 1s
       if len(candidate_cars[b]) == 1 and frame > frame_fingerprint:
-        # fingerprint done
-        car_fingerprint = candidate_cars[b][0]
+          # fingerprint done
+          car_fingerprint = candidate_cars[b][0]
 
     # bail if no cars left or we've been waiting for more than 2s
     failed = (all(len(cc) == 0 for cc in candidate_cars.values()) and frame > frame_fingerprint) or frame > 200
@@ -162,16 +172,40 @@ def fingerprint(logcan, sendcan, has_relay):
                  source=source, fuzzy=not exact_match, fw_count=len(car_fw))
   return car_fingerprint, finger, vin, car_fw, source, exact_match
 
-
-def get_car(logcan, sendcan, has_relay=False):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(logcan, sendcan, has_relay)
+RECHECK_CANDIDATES = [CAR.ESCALADE_ESV]
+FORCE_VOLT = Params().get_bool("FPVolt")
+def get_car(logcan, sendcan):
+  
+  old_fp = ''
+  candidate = None
+  num_matches = 0
+  num_matches_min = 1
+  iter_max = 4
+  iter_cur = 0
+  
+  while iter_cur < iter_max and num_matches < num_matches_min:
+    candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(logcan, sendcan)
+    if FORCE_VOLT and candidate not in [CAR.VOLT, CAR.VOLT18]:
+      candidate = CAR.VOLT
+      old_fp = CAR.VOLT
+      break
+    if candidate == old_fp:
+      num_matches += 1
+    else:
+      num_matches = 0
+    old_fp = candidate
+    if candidate and exact_match and candidate not in RECHECK_CANDIDATES:
+      break
+  
+  if old_fp != candidate:
+    candidate = None
 
   if candidate is None:
     cloudlog.warning("car doesn't match any fingerprints: %r", fingerprints)
     candidate = "mock"
 
   CarInterface, CarController, CarState = interfaces[candidate]
-  car_params = CarInterface.get_params(candidate, fingerprints, has_relay, car_fw)
+  car_params = CarInterface.get_params(candidate, fingerprints, car_fw)
   car_params.carVin = vin
   car_params.carFw = car_fw
   car_params.fingerprintSource = source
